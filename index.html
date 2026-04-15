@@ -1,0 +1,562 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>🌙 Moon Phase Auto-Centering Tool</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet" />
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', sans-serif;
+      min-height: 100vh;
+      background: radial-gradient(ellipse at 20% 20%, #0d1b4b 0%, #050b1a 50%, #0a0014 100%);
+      color: #e0e8ff;
+      overflow-x: hidden;
+    }
+
+    /* Stars */
+    body::before {
+      content: '';
+      position: fixed;
+      inset: 0;
+      background-image:
+        radial-gradient(1px 1px at 10% 15%, rgba(255,255,255,0.7) 0%, transparent 100%),
+        radial-gradient(1px 1px at 30% 45%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(1.5px 1.5px at 55% 20%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(1px 1px at 70% 60%, rgba(255,255,255,0.4) 0%, transparent 100%),
+        radial-gradient(1px 1px at 85% 10%, rgba(255,255,255,0.7) 0%, transparent 100%),
+        radial-gradient(1px 1px at 90% 80%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(1px 1px at 20% 75%, rgba(255,255,255,0.6) 0%, transparent 100%),
+        radial-gradient(1.5px 1.5px at 45% 85%, rgba(255,255,255,0.4) 0%, transparent 100%),
+        radial-gradient(1px 1px at 65% 40%, rgba(255,255,255,0.5) 0%, transparent 100%),
+        radial-gradient(1px 1px at 5% 50%,  rgba(255,255,255,0.6) 0%, transparent 100%);
+      pointer-events: none;
+      z-index: 0;
+    }
+
+    .container {
+      position: relative;
+      z-index: 1;
+      max-width: 1140px;
+      margin: 0 auto;
+      padding: 2rem 1.5rem 4rem;
+    }
+
+    /* Header */
+    header { text-align: center; margin-bottom: 2.5rem; }
+    .moon-icon {
+      font-size: 4rem;
+      display: block;
+      filter: drop-shadow(0 0 20px rgba(255,220,100,0.8));
+      animation: moonPulse 3s ease-in-out infinite;
+    }
+    @keyframes moonPulse {
+      0%,100% { transform: scale(1);    filter: drop-shadow(0 0 20px rgba(255,220,100,0.8)); }
+      50%      { transform: scale(1.05); filter: drop-shadow(0 0 35px rgba(255,220,100,1)); }
+    }
+    h1 {
+      font-size: 2.2rem; font-weight: 700;
+      background: linear-gradient(135deg, #ffe680, #ffc94d, #c9a0ff);
+      -webkit-background-clip: text; -webkit-text-fill-color: transparent; background-clip: text;
+      margin-top: 0.5rem;
+    }
+    .subtitle { font-size: 0.95rem; color: rgba(200,215,255,0.6); margin-top: 0.4rem; }
+
+    /* Glass card */
+    .glass {
+      background: rgba(255,255,255,0.05);
+      backdrop-filter: blur(20px) saturate(180%);
+      -webkit-backdrop-filter: blur(20px) saturate(180%);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 20px;
+      box-shadow: 0 8px 32px rgba(0,0,0,0.4), inset 0 1px 0 rgba(255,255,255,0.1);
+      padding: 2rem;
+      transition: box-shadow 0.3s ease;
+    }
+    .glass:hover {
+      box-shadow: 0 12px 48px rgba(80,60,180,0.3), inset 0 1px 0 rgba(255,255,255,0.12);
+    }
+
+    /* Stats bar */
+    .stats-bar {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+    .stat-card {
+      background: rgba(255,255,255,0.04);
+      border: 1px solid rgba(255,255,255,0.08);
+      border-radius: 14px; padding: 1.2rem; text-align: center;
+    }
+    .stat-card .val { font-size: 2rem; font-weight: 700; color: #ffe680; }
+    .stat-card .lbl {
+      font-size: 0.78rem; color: rgba(200,215,255,0.55);
+      margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.08em;
+    }
+
+    /* Controls */
+    .controls { display: flex; gap: 1rem; align-items: center; flex-wrap: wrap; margin-bottom: 2rem; }
+
+    #startBtn {
+      display: inline-flex; align-items: center; gap: 0.5rem;
+      padding: 0.85rem 2.2rem;
+      border: none; border-radius: 50px;
+      font-family: 'Inter', sans-serif; font-size: 1rem; font-weight: 600;
+      cursor: pointer;
+      background: linear-gradient(135deg, #7b5fd8, #c97dff, #ff9f4a);
+      color: #fff;
+      box-shadow: 0 4px 18px rgba(160,100,255,0.45);
+      transition: transform 0.2s, box-shadow 0.2s, opacity 0.2s;
+      letter-spacing: 0.02em;
+    }
+    #startBtn:hover:not(:disabled)  { transform: translateY(-2px); box-shadow: 0 8px 28px rgba(160,100,255,0.65); }
+    #startBtn:active:not(:disabled) { transform: translateY(0); }
+    #startBtn:disabled               { opacity: 0.5; cursor: not-allowed; }
+
+    .status-badge {
+      padding: 0.4rem 1rem; border-radius: 50px;
+      font-size: 0.82rem; font-weight: 600; letter-spacing: 0.04em;
+      background: rgba(255,255,255,0.07); border: 1px solid rgba(255,255,255,0.15);
+    }
+    .status-badge.running { background: rgba(255,200,60,0.15);  border-color: #ffc83c; color: #ffc83c; }
+    .status-badge.done    { background: rgba(80,220,130,0.15);  border-color: #50dc82; color: #50dc82; }
+    .status-badge.idle    { color: rgba(200,215,255,0.5); }
+
+    /* Progress */
+    .progress-wrap { margin-bottom: 2rem; }
+    .progress-label {
+      display: flex; justify-content: space-between;
+      font-size: 0.82rem; color: rgba(200,215,255,0.6); margin-bottom: 0.5rem;
+    }
+    .progress-track { height: 8px; background: rgba(255,255,255,0.08); border-radius: 50px; overflow: hidden; }
+    .progress-fill {
+      height: 100%; width: 0%;
+      background: linear-gradient(90deg, #7b5fd8, #c97dff, #ff9f4a);
+      border-radius: 50px; transition: width 0.4s ease;
+      box-shadow: 0 0 10px rgba(201,125,255,0.5);
+    }
+
+    /* Result list */
+    .results-title {
+      font-size: 0.9rem; font-weight: 600;
+      color: rgba(200,215,255,0.7); text-transform: uppercase; letter-spacing: 0.08em;
+      margin-bottom: 1rem;
+    }
+    .result-list {
+      display: flex; flex-direction: column; gap: 0.5rem;
+      max-height: 300px; overflow-y: auto; padding-right: 4px;
+    }
+    .result-list::-webkit-scrollbar       { width: 5px; }
+    .result-list::-webkit-scrollbar-track { background: rgba(255,255,255,0.03); border-radius: 10px; }
+    .result-list::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.15); border-radius: 10px; }
+
+    .result-row {
+      display: flex; align-items: center; gap: 0.8rem;
+      padding: 0.7rem 1rem; border-radius: 10px;
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(255,255,255,0.06);
+      font-size: 0.875rem;
+      animation: fadeSlide 0.3s ease backwards;
+    }
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateX(-10px); }
+      to   { opacity: 1; transform: translateX(0); }
+    }
+    .result-row .icon  { font-size: 1.1rem; flex-shrink: 0; }
+    .result-row .fname { flex: 1; color: #c9d8ff; font-weight: 500; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .result-row .msg   { color: rgba(200,215,255,0.5); font-size: 0.78rem; flex-shrink: 0; }
+
+    /* ── Gallery tabs ── */
+    .gallery-section { margin-top: 2rem; }
+    .tab-bar {
+      display: flex; gap: 0.5rem; margin-bottom: 1.5rem;
+    }
+    .tab-btn {
+      padding: 0.5rem 1.4rem; border-radius: 50px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.05);
+      color: rgba(200,215,255,0.6);
+      font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 600;
+      cursor: pointer; transition: all 0.2s;
+      letter-spacing: 0.04em;
+    }
+    .tab-btn:hover { background: rgba(255,255,255,0.1); color: #e0e8ff; }
+    .tab-btn.active {
+      background: linear-gradient(135deg, rgba(123,95,216,0.4), rgba(201,125,255,0.3));
+      border-color: rgba(201,125,255,0.5); color: #fff;
+      box-shadow: 0 0 16px rgba(160,100,255,0.3);
+    }
+
+    .tab-panel { display: none; }
+    .tab-panel.active { display: block; }
+
+    .gallery-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(180px, 1fr));
+      gap: 0.8rem;
+    }
+    .gallery-item {
+      border-radius: 12px; overflow: hidden;
+      border: 1px solid rgba(255,255,255,0.1);
+      cursor: pointer; position: relative;
+      aspect-ratio: 4/3;
+      background: rgba(255,255,255,0.03);
+      transition: transform 0.2s, border-color 0.2s, box-shadow 0.2s;
+    }
+    .gallery-item:hover {
+      transform: scale(1.04);
+      border-color: rgba(200,130,255,0.55);
+      box-shadow: 0 6px 24px rgba(150,80,255,0.3);
+    }
+    .gallery-item img { width: 100%; height: 100%; object-fit: cover; display: block; }
+    .gallery-item .fname-overlay {
+      position: absolute; bottom: 0; left: 0; right: 0;
+      background: linear-gradient(transparent, rgba(0,0,0,0.75));
+      padding: 0.5rem 0.4rem 0.4rem;
+      font-size: 0.65rem; color: rgba(220,230,255,0.85);
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    .gallery-empty {
+      color: rgba(200,215,255,0.35); font-size: 0.85rem; padding: 1rem 0;
+      grid-column: 1 / -1;
+    }
+
+    /* ── Lightbox with side-by-side comparison ── */
+    #lightbox {
+      display: none; position: fixed; inset: 0;
+      background: rgba(0,0,0,0.88);
+      backdrop-filter: blur(12px);
+      z-index: 1000;
+      align-items: center; justify-content: center;
+      flex-direction: column; gap: 1rem;
+    }
+    #lightbox.open { display: flex; }
+
+    #lightbox .close-btn {
+      position: absolute; top: 1.2rem; right: 1.5rem;
+      font-size: 2rem; cursor: pointer;
+      color: rgba(255,255,255,0.7); line-height: 1; transition: color 0.2s;
+    }
+    #lightbox .close-btn:hover { color: #fff; }
+
+    /* Single image mode */
+    #lbSingle { display: flex; flex-direction: column; align-items: center; gap: 0.8rem; }
+    #lbSingle img {
+      max-width: 88vw; max-height: 78vh;
+      border-radius: 12px; border: 1px solid rgba(255,255,255,0.15);
+      box-shadow: 0 20px 60px rgba(0,0,0,0.7);
+    }
+
+    /* Comparison mode */
+    #lbCompare {
+      display: none;
+      flex-direction: row; align-items: flex-start; gap: 1.2rem;
+      max-width: 96vw;
+    }
+    #lbCompare.show { display: flex; }
+    .lb-col { display: flex; flex-direction: column; align-items: center; gap: 0.5rem; flex: 1; }
+    .lb-col-label {
+      font-size: 0.78rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: rgba(200,215,255,0.6);
+    }
+    .lb-col img {
+      max-width: 44vw; max-height: 75vh;
+      border-radius: 10px; border: 1px solid rgba(255,255,255,0.12);
+      box-shadow: 0 12px 40px rgba(0,0,0,0.6);
+      object-fit: contain;
+    }
+
+    #lightbox-label { color: rgba(200,215,255,0.7); font-size: 0.85rem; }
+
+    /* toggle compare btn */
+    #compareToggle {
+      padding: 0.35rem 1rem; border-radius: 50px;
+      border: 1px solid rgba(201,125,255,0.4);
+      background: rgba(123,95,216,0.2);
+      color: #c9a0ff; font-family: 'Inter', sans-serif; font-size: 0.8rem;
+      cursor: pointer; transition: all 0.2s;
+    }
+    #compareToggle:hover { background: rgba(123,95,216,0.4); }
+    #compareToggle.hidden { display: none; }
+
+    /* Responsive */
+    @media (max-width: 600px) {
+      h1 { font-size: 1.6rem; }
+      .stats-bar { grid-template-columns: 1fr 1fr; }
+      #lbCompare { flex-direction: column; }
+      .lb-col img { max-width: 88vw; max-height: 38vh; }
+    }
+  </style>
+</head>
+<body>
+
+<div class="container">
+  <header>
+    <span class="moon-icon">🌕</span>
+    <h1>Moon Phase Auto-Centering</h1>
+    <p class="subtitle">Detects &amp; centers the moon • Works with blue-sky daytime photos • Output saved to <code>centered/</code></p>
+  </header>
+
+  <!-- Stats -->
+  <div class="stats-bar" id="statsBar">
+    <div class="stat-card"><div class="val" id="statTotal">–</div><div class="lbl">Total Photos</div></div>
+    <div class="stat-card"><div class="val" id="statDone">–</div><div class="lbl">Processed</div></div>
+    <div class="stat-card"><div class="val" id="statOk">–</div><div class="lbl">Centered OK</div></div>
+    <div class="stat-card"><div class="val" id="statSkip">–</div><div class="lbl">Skipped / Error</div></div>
+  </div>
+
+  <!-- Control card -->
+  <div class="glass" style="margin-bottom:1.5rem;">
+    <div class="controls">
+      <button id="startBtn" onclick="startProcessing()">⚡ Start Centering</button>
+      <span class="status-badge idle" id="statusBadge">Idle</span>
+    </div>
+    <div class="progress-wrap">
+      <div class="progress-label">
+        <span>Progress</span>
+        <span id="progressPct">0%</span>
+      </div>
+      <div class="progress-track"><div class="progress-fill" id="progressFill"></div></div>
+    </div>
+    <div class="results-title">Processing Log</div>
+    <div class="result-list" id="resultList">
+      <div style="color:rgba(200,215,255,0.35);font-size:0.85rem;padding:0.5rem 0;">
+        Click <strong style="color:#c97dff">Start Centering</strong> to begin.
+      </div>
+    </div>
+  </div>
+
+  <!-- Gallery -->
+  <div class="gallery-section glass">
+    <div class="tab-bar">
+      <button class="tab-btn active" id="tabSrc" onclick="switchTab('src')">📷 Source Photos</button>
+      <button class="tab-btn" id="tabOut" onclick="switchTab('out')">🎯 Centered Output</button>
+    </div>
+
+    <div class="tab-panel active" id="panelSrc">
+      <div class="gallery-grid" id="gallerySrc">
+        <div class="gallery-empty">Loading previews…</div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panelOut">
+      <div class="gallery-grid" id="galleryOut">
+        <div class="gallery-empty">Run centering first, then check here.</div>
+      </div>
+    </div>
+  </div>
+</div>
+
+<!-- Lightbox -->
+<div id="lightbox">
+  <span class="close-btn" onclick="closeLightbox()">×</span>
+
+  <!-- Single-image view -->
+  <div id="lbSingle">
+    <img id="lightboxImg" src="" alt="preview" />
+    <div id="lightbox-label"></div>
+    <button id="compareToggle" class="hidden" onclick="openCompare()">⇄ Compare Before / After</button>
+  </div>
+
+  <!-- Side-by-side comparison -->
+  <div id="lbCompare">
+    <div class="lb-col">
+      <div class="lb-col-label">Before (Source)</div>
+      <img id="lbBefore" src="" alt="before" />
+    </div>
+    <div class="lb-col">
+      <div class="lb-col-label">After (Centered)</div>
+      <img id="lbAfter" src="" alt="after" />
+    </div>
+  </div>
+  <div id="lightbox-label-cmp" style="color:rgba(200,215,255,0.6);font-size:0.82rem;display:none;"></div>
+</div>
+
+<script>
+  let pollTimer = null;
+  let knownResults = 0;
+  let currentTab = 'src';
+  let currentFile = null; // filename for compare
+
+  // ── Tab switching ────────────────────────────────────────────────────────────
+  function switchTab(tab) {
+    currentTab = tab;
+    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
+    document.getElementById(tab === 'src' ? 'tabSrc' : 'tabOut').classList.add('active');
+    document.getElementById(tab === 'src' ? 'panelSrc' : 'panelOut').classList.add('active');
+    if (tab === 'out') loadGalleryOut();
+  }
+
+  // ── Galleries ────────────────────────────────────────────────────────────────
+  async function loadGallerySrc() {
+    const res = await fetch('/images');
+    const files = await res.json();
+    const grid = document.getElementById('gallerySrc');
+    grid.innerHTML = '';
+    document.getElementById('statTotal').textContent = files.length || '–';
+    if (!files.length) {
+      grid.innerHTML = '<div class="gallery-empty">No photos found.</div>';
+      return;
+    }
+    files.forEach(f => {
+      const item = buildGalleryItem(f, `/preview/${f}`, 'src');
+      grid.appendChild(item);
+    });
+  }
+
+  async function loadGalleryOut() {
+    const res = await fetch('/images/centered');
+    const files = await res.json();
+    const grid = document.getElementById('galleryOut');
+    grid.innerHTML = '';
+    if (!files.length) {
+      grid.innerHTML = '<div class="gallery-empty">No centered images yet. Run centering first.</div>';
+      return;
+    }
+    files.forEach(f => {
+      const item = buildGalleryItem(f, `/preview_centered/${f}`, 'out');
+      grid.appendChild(item);
+    });
+  }
+
+  function buildGalleryItem(fname, src, type) {
+    const item = document.createElement('div');
+    item.className = 'gallery-item';
+    item.innerHTML = `<img src="${src}" loading="lazy" alt="${fname}"/><div class="fname-overlay">${fname}</div>`;
+    item.onclick = () => openLightbox(src, fname, type);
+    return item;
+  }
+
+  // ── Lightbox ─────────────────────────────────────────────────────────────────
+  function openLightbox(src, label, type) {
+    currentFile = label;
+    // Reset to single view
+    document.getElementById('lbSingle').style.display   = 'flex';
+    document.getElementById('lbCompare').classList.remove('show');
+    document.getElementById('lightbox-label-cmp').style.display = 'none';
+
+    document.getElementById('lightboxImg').src = src;
+    document.getElementById('lightbox-label').textContent = label;
+
+    // Show compare button only for source photos (if centered version may exist)
+    const toggle = document.getElementById('compareToggle');
+    if (type === 'src') {
+      toggle.classList.remove('hidden');
+    } else {
+      toggle.classList.add('hidden');
+    }
+
+    document.getElementById('lightbox').classList.add('open');
+  }
+
+  function openCompare() {
+    if (!currentFile) return;
+    document.getElementById('lbBefore').src = `/preview/${currentFile}`;
+    document.getElementById('lbAfter').src  = `/preview_centered/${currentFile}`;
+    document.getElementById('lbSingle').style.display   = 'none';
+    document.getElementById('lbCompare').classList.add('show');
+    document.getElementById('lightbox-label-cmp').textContent = currentFile;
+    document.getElementById('lightbox-label-cmp').style.display = 'block';
+  }
+
+  function closeLightbox() {
+    document.getElementById('lightbox').classList.remove('open');
+    document.getElementById('lightboxImg').src = '';
+    document.getElementById('lbBefore').src = '';
+    document.getElementById('lbAfter').src  = '';
+    currentFile = null;
+  }
+
+  document.getElementById('lightbox').addEventListener('click', e => {
+    if (e.target === document.getElementById('lightbox')) closeLightbox();
+  });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') closeLightbox(); });
+
+  // ── Processing ───────────────────────────────────────────────────────────────
+  async function startProcessing() {
+    const btn = document.getElementById('startBtn');
+    btn.disabled = true;
+    knownResults = 0;
+    document.getElementById('resultList').innerHTML = '';
+
+    const res = await fetch('/start', { method: 'POST' });
+    if (!res.ok) {
+      const data = await res.json();
+      alert(data.error || 'Failed to start');
+      btn.disabled = false;
+      return;
+    }
+    pollStatus();
+  }
+
+  function pollStatus() {
+    if (pollTimer) clearTimeout(pollTimer);
+    fetch('/status')
+      .then(r => r.json())
+      .then(data => {
+        updateUI(data);
+        if (data.running) {
+          pollTimer = setTimeout(pollStatus, 600);
+        } else {
+          document.getElementById('startBtn').disabled = false;
+          loadGalleryOut();
+          if (currentTab === 'out') loadGalleryOut();
+        }
+      })
+      .catch(() => { pollTimer = setTimeout(pollStatus, 1500); });
+  }
+
+  const statusIcons = { ok: '✅', skipped: '⚠️', error: '❌' };
+
+  function updateUI(data) {
+    const total   = data.total   || 0;
+    const done    = data.done    || 0;
+    const results = data.results || [];
+
+    const okCount   = results.filter(r => r.status === 'ok').length;
+    const skipCount = results.filter(r => r.status !== 'ok').length;
+
+    document.getElementById('statTotal').textContent = total   || '–';
+    document.getElementById('statDone').textContent  = done;
+    document.getElementById('statOk').textContent    = okCount;
+    document.getElementById('statSkip').textContent  = skipCount;
+
+    const pct = total ? Math.round((done / total) * 100) : 0;
+    document.getElementById('progressFill').style.width   = pct + '%';
+    document.getElementById('progressPct').textContent     = pct + '%';
+
+    const badge = document.getElementById('statusBadge');
+    if (data.running) {
+      badge.textContent = '⏳ Running…'; badge.className = 'status-badge running';
+    } else if (done > 0) {
+      badge.textContent = '✅ Complete'; badge.className = 'status-badge done';
+    } else {
+      badge.textContent = 'Idle'; badge.className = 'status-badge idle';
+    }
+
+    const list = document.getElementById('resultList');
+    for (let i = knownResults; i < results.length; i++) {
+      const r = results[i];
+      const row = document.createElement('div');
+      row.className = 'result-row';
+      row.style.animationDelay = ((i - knownResults) * 0.05) + 's';
+      row.innerHTML = `
+        <span class="icon">${statusIcons[r.status] || '❓'}</span>
+        <span class="fname">${r.file}</span>
+        <span class="msg">${r.msg}</span>
+      `;
+      list.appendChild(row);
+      list.scrollTop = list.scrollHeight;
+    }
+    knownResults = results.length;
+  }
+
+  // Init
+  loadGallerySrc();
+</script>
+</body>
+</html>
