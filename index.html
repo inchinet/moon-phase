@@ -20,8 +20,7 @@
     /* Stars */
     body::before {
       content: '';
-      position: fixed;
-      inset: 0;
+      position: fixed; inset: 0;
       background-image:
         radial-gradient(1px 1px at 10% 15%, rgba(255,255,255,0.7) 0%, transparent 100%),
         radial-gradient(1px 1px at 30% 45%, rgba(255,255,255,0.5) 0%, transparent 100%),
@@ -33,23 +32,19 @@
         radial-gradient(1.5px 1.5px at 45% 85%, rgba(255,255,255,0.4) 0%, transparent 100%),
         radial-gradient(1px 1px at 65% 40%, rgba(255,255,255,0.5) 0%, transparent 100%),
         radial-gradient(1px 1px at 5% 50%,  rgba(255,255,255,0.6) 0%, transparent 100%);
-      pointer-events: none;
-      z-index: 0;
+      pointer-events: none; z-index: 0;
     }
 
     .container {
-      position: relative;
-      z-index: 1;
-      max-width: 1140px;
-      margin: 0 auto;
+      position: relative; z-index: 1;
+      max-width: 1140px; margin: 0 auto;
       padding: 2rem 1.5rem 4rem;
     }
 
     /* Header */
     header { text-align: center; margin-bottom: 2.5rem; }
     .moon-icon {
-      font-size: 4rem;
-      display: block;
+      font-size: 4rem; display: block;
       filter: drop-shadow(0 0 20px rgba(255,220,100,0.8));
       animation: moonPulse 3s ease-in-out infinite;
     }
@@ -80,12 +75,91 @@
       box-shadow: 0 12px 48px rgba(80,60,180,0.3), inset 0 1px 0 rgba(255,255,255,0.12);
     }
 
+    /* ── Path picker ── */
+    .path-section { margin-bottom: 1.8rem; }
+    .path-section h3 {
+      font-size: 0.82rem; font-weight: 600; text-transform: uppercase;
+      letter-spacing: 0.08em; color: rgba(200,215,255,0.55);
+      margin-bottom: 1rem;
+    }
+    .path-row {
+      display: flex; align-items: center; gap: 0.6rem;
+      margin-bottom: 0.75rem;
+    }
+    .path-label {
+      font-size: 0.78rem; color: rgba(200,215,255,0.5);
+      width: 72px; flex-shrink: 0;
+    }
+    .path-input {
+      flex: 1;
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.14);
+      border-radius: 10px;
+      padding: 0.55rem 0.9rem;
+      font-family: 'Inter', monospace; font-size: 0.82rem;
+      color: #c9d8ff;
+      transition: border-color 0.2s, background 0.2s;
+      outline: none;
+    }
+    .path-input:focus {
+      border-color: rgba(201,125,255,0.6);
+      background: rgba(255,255,255,0.09);
+    }
+    .path-input::placeholder { color: rgba(200,215,255,0.28); }
+    .path-browse-btn {
+      padding: 0.5rem 0.9rem; border-radius: 10px;
+      border: 1px solid rgba(255,255,255,0.15);
+      background: rgba(255,255,255,0.07);
+      color: rgba(200,215,255,0.7);
+      font-family: 'Inter', sans-serif; font-size: 0.78rem;
+      cursor: pointer; transition: all 0.2s; white-space: nowrap;
+    }
+    .path-browse-btn:hover { background: rgba(255,255,255,0.14); color: #e0e8ff; }
+
+    /* mini file browser */
+    .mini-browser {
+      display: none;
+      background: rgba(10,5,30,0.92);
+      border: 1px solid rgba(201,125,255,0.3);
+      border-radius: 14px;
+      padding: 1rem;
+      margin-top: 0.4rem;
+      margin-bottom: 0.4rem;
+      max-height: 220px; overflow-y: auto;
+    }
+    .mini-browser.open { display: block; }
+    .mini-browser-header {
+      font-size: 0.72rem; color: rgba(200,215,255,0.45);
+      margin-bottom: 0.6rem; word-break: break-all;
+    }
+    .mini-browser-item {
+      display: flex; align-items: center; gap: 0.5rem;
+      padding: 0.4rem 0.6rem; border-radius: 8px;
+      cursor: pointer; font-size: 0.8rem; color: #c9d8ff;
+      transition: background 0.15s;
+    }
+    .mini-browser-item:hover { background: rgba(201,125,255,0.12); }
+    .mini-browser-item.up { color: rgba(200,215,255,0.45); }
+    .mini-browser-badge {
+      margin-left: auto;
+      font-size: 0.68rem; color: rgba(255,200,60,0.7);
+      background: rgba(255,200,60,0.08);
+      padding: 0.15rem 0.5rem; border-radius: 50px;
+    }
+    .mini-browser::-webkit-scrollbar { width: 4px; }
+    .mini-browser::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 10px; }
+
+    /* img count hint */
+    .path-hint {
+      font-size: 0.73rem; color: rgba(200,215,255,0.38);
+      margin-left: 78px; margin-top: -0.3rem; margin-bottom: 0.4rem;
+    }
+
     /* Stats bar */
     .stats-bar {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 1rem; margin-bottom: 2rem;
     }
     .stat-card {
       background: rgba(255,255,255,0.04);
@@ -93,6 +167,7 @@
       border-radius: 14px; padding: 1.2rem; text-align: center;
     }
     .stat-card .val { font-size: 2rem; font-weight: 700; color: #ffe680; }
+    .stat-card.rejected .val { color: #ff7070; }
     .stat-card .lbl {
       font-size: 0.78rem; color: rgba(200,215,255,0.55);
       margin-top: 0.25rem; text-transform: uppercase; letter-spacing: 0.08em;
@@ -171,23 +246,25 @@
 
     /* ── Gallery tabs ── */
     .gallery-section { margin-top: 2rem; }
-    .tab-bar {
-      display: flex; gap: 0.5rem; margin-bottom: 1.5rem;
-    }
+    .tab-bar { display: flex; gap: 0.5rem; margin-bottom: 1.5rem; flex-wrap: wrap; }
     .tab-btn {
       padding: 0.5rem 1.4rem; border-radius: 50px;
       border: 1px solid rgba(255,255,255,0.15);
       background: rgba(255,255,255,0.05);
       color: rgba(200,215,255,0.6);
       font-family: 'Inter', sans-serif; font-size: 0.85rem; font-weight: 600;
-      cursor: pointer; transition: all 0.2s;
-      letter-spacing: 0.04em;
+      cursor: pointer; transition: all 0.2s; letter-spacing: 0.04em;
     }
     .tab-btn:hover { background: rgba(255,255,255,0.1); color: #e0e8ff; }
     .tab-btn.active {
       background: linear-gradient(135deg, rgba(123,95,216,0.4), rgba(201,125,255,0.3));
       border-color: rgba(201,125,255,0.5); color: #fff;
       box-shadow: 0 0 16px rgba(160,100,255,0.3);
+    }
+    .tab-btn.rejected-tab.active {
+      background: linear-gradient(135deg, rgba(216,95,95,0.35), rgba(255,100,100,0.2));
+      border-color: rgba(255,120,120,0.5);
+      box-shadow: 0 0 16px rgba(255,80,80,0.25);
     }
 
     .tab-panel { display: none; }
@@ -224,7 +301,7 @@
       grid-column: 1 / -1;
     }
 
-    /* ── Lightbox with side-by-side comparison ── */
+    /* ── Lightbox ── */
     #lightbox {
       display: none; position: fixed; inset: 0;
       background: rgba(0,0,0,0.88);
@@ -242,7 +319,6 @@
     }
     #lightbox .close-btn:hover { color: #fff; }
 
-    /* Single image mode */
     #lbSingle { display: flex; flex-direction: column; align-items: center; gap: 0.8rem; }
     #lbSingle img {
       max-width: 88vw; max-height: 78vh;
@@ -250,7 +326,6 @@
       box-shadow: 0 20px 60px rgba(0,0,0,0.7);
     }
 
-    /* Comparison mode */
     #lbCompare {
       display: none;
       flex-direction: row; align-items: flex-start; gap: 1.2rem;
@@ -271,7 +346,6 @@
 
     #lightbox-label { color: rgba(200,215,255,0.7); font-size: 0.85rem; }
 
-    /* toggle compare btn */
     #compareToggle {
       padding: 0.35rem 1rem; border-radius: 50px;
       border: 1px solid rgba(201,125,255,0.4);
@@ -282,12 +356,12 @@
     #compareToggle:hover { background: rgba(123,95,216,0.4); }
     #compareToggle.hidden { display: none; }
 
-    /* Responsive */
     @media (max-width: 600px) {
       h1 { font-size: 1.6rem; }
       .stats-bar { grid-template-columns: 1fr 1fr; }
       #lbCompare { flex-direction: column; }
       .lb-col img { max-width: 88vw; max-height: 38vh; }
+      .path-label { width: 56px; }
     }
   </style>
 </head>
@@ -297,14 +371,51 @@
   <header>
     <span class="moon-icon">🌕</span>
     <h1>Moon Phase Auto-Centering</h1>
-    <p class="subtitle">Detects &amp; centers the moon • Works with blue-sky daytime photos • Output saved to <code>centered/</code></p>
+    <p class="subtitle">Auto-detects &amp; centers the moon · Matches focal length · Fills gaps with scene background</p>
   </header>
+
+  <!-- ── Path Configuration ── -->
+  <div class="glass" style="margin-bottom:1.5rem;">
+    <div class="path-section">
+      <h3>📁 Folder Setup</h3>
+
+      <!-- Input path -->
+      <div class="path-row">
+        <span class="path-label">Input</span>
+        <input type="text" id="inputDir" class="path-input"
+               placeholder="e.g. Z:\moon-phase\input"
+               oninput="onInputDirChange()" />
+        <button class="path-browse-btn" onclick="openBrowser('input')">Browse…</button>
+      </div>
+      <div class="path-hint" id="inputHint">Enter a folder path containing moon photos</div>
+      <div class="mini-browser" id="browserInput"></div>
+
+      <!-- Output path -->
+      <div class="path-row">
+        <span class="path-label">Output</span>
+        <input type="text" id="outputDir" class="path-input"
+               placeholder="Default: &lt;input&gt;/centered" />
+        <button class="path-browse-btn" onclick="openBrowser('output')">Browse…</button>
+      </div>
+      <div class="mini-browser" id="browserOutput"></div>
+
+      <!-- Reject path -->
+      <div class="path-row">
+        <span class="path-label">Rejected</span>
+        <input type="text" id="rejectDir" class="path-input"
+               placeholder="Default: &lt;input&gt;/reject" />
+        <button class="path-browse-btn" onclick="openBrowser('reject')">Browse…</button>
+      </div>
+      <div class="mini-browser" id="browserReject"></div>
+    </div>
+  </div>
 
   <!-- Stats -->
   <div class="stats-bar" id="statsBar">
     <div class="stat-card"><div class="val" id="statTotal">–</div><div class="lbl">Total Photos</div></div>
     <div class="stat-card"><div class="val" id="statDone">–</div><div class="lbl">Processed</div></div>
     <div class="stat-card"><div class="val" id="statOk">–</div><div class="lbl">Centered OK</div></div>
+    <div class="stat-card rejected"><div class="val" id="statReject">–</div><div class="lbl">Rejected (FL)</div></div>
     <div class="stat-card"><div class="val" id="statSkip">–</div><div class="lbl">Skipped / Error</div></div>
   </div>
 
@@ -324,7 +435,7 @@
     <div class="results-title">Processing Log</div>
     <div class="result-list" id="resultList">
       <div style="color:rgba(200,215,255,0.35);font-size:0.85rem;padding:0.5rem 0;">
-        Click <strong style="color:#c97dff">Start Centering</strong> to begin.
+        Set input folder above then click <strong style="color:#c97dff">Start Centering</strong>.
       </div>
     </div>
   </div>
@@ -332,19 +443,26 @@
   <!-- Gallery -->
   <div class="gallery-section glass">
     <div class="tab-bar">
-      <button class="tab-btn active" id="tabSrc" onclick="switchTab('src')">📷 Source Photos</button>
-      <button class="tab-btn" id="tabOut" onclick="switchTab('out')">🎯 Centered Output</button>
+      <button class="tab-btn active"       id="tabSrc"     onclick="switchTab('src')">📷 Source Photos</button>
+      <button class="tab-btn"              id="tabOut"     onclick="switchTab('out')">🎯 Centered Output</button>
+      <button class="tab-btn rejected-tab" id="tabReject"  onclick="switchTab('reject')">🚫 Rejected</button>
     </div>
 
     <div class="tab-panel active" id="panelSrc">
       <div class="gallery-grid" id="gallerySrc">
-        <div class="gallery-empty">Loading previews…</div>
+        <div class="gallery-empty">Enter a source folder and run centering.</div>
       </div>
     </div>
 
     <div class="tab-panel" id="panelOut">
       <div class="gallery-grid" id="galleryOut">
         <div class="gallery-empty">Run centering first, then check here.</div>
+      </div>
+    </div>
+
+    <div class="tab-panel" id="panelReject">
+      <div class="gallery-grid" id="galleryReject">
+        <div class="gallery-empty">No rejected images yet.</div>
       </div>
     </div>
   </div>
@@ -354,14 +472,12 @@
 <div id="lightbox">
   <span class="close-btn" onclick="closeLightbox()">×</span>
 
-  <!-- Single-image view -->
   <div id="lbSingle">
     <img id="lightboxImg" src="" alt="preview" />
     <div id="lightbox-label"></div>
     <button id="compareToggle" class="hidden" onclick="openCompare()">⇄ Compare Before / After</button>
   </div>
 
-  <!-- Side-by-side comparison -->
   <div id="lbCompare">
     <div class="lb-col">
       <div class="lb-col-label">Before (Source)</div>
@@ -376,79 +492,215 @@
 </div>
 
 <script>
-  let pollTimer = null;
+  let pollTimer    = null;
   let knownResults = 0;
-  let currentTab = 'src';
-  let currentFile = null; // filename for compare
+  let currentTab   = 'src';
+  let currentFile  = null;
+
+  // Active mini-browser state
+  let activeBrowserTarget = null;  // 'input' | 'output' | 'reject'
+  let browserCurrentPath  = {};    // { input: path, output: path, reject: path }
+
+  // ── Path input helpers ───────────────────────────────────────────────────────
+
+  function onInputDirChange() {
+    const val = document.getElementById('inputDir').value.trim();
+    // Auto-suggest output / reject based on input
+    if (val && !document.getElementById('outputDir').value.trim()) {
+      // Just update placeholder text hint
+    }
+    checkInputPath(val);
+  }
+
+  async function checkInputPath(path) {
+    if (!path) {
+      document.getElementById('inputHint').textContent = 'Enter a folder path containing moon photos';
+      return;
+    }
+    try {
+      const res  = await fetch(`/browse?path=${encodeURIComponent(path)}`);
+      if (!res.ok) { document.getElementById('inputHint').textContent = '⚠ Path not found'; return; }
+      const data = await res.json();
+      document.getElementById('inputHint').textContent =
+        `✔ ${data.img_count} photo${data.img_count !== 1 ? 's' : ''} found`;
+      // Reload gallery if path changed
+      loadGallerySrc();
+    } catch(e) {
+      document.getElementById('inputHint').textContent = '⚠ Cannot read path';
+    }
+  }
+
+  // ── Mini browser ─────────────────────────────────────────────────────────────
+
+  function openBrowser(target) {
+    // Close any open browser first
+    ['input','output','reject'].forEach(t => {
+      if (t !== target) {
+        document.getElementById('browser' + cap(t)).classList.remove('open');
+      }
+    });
+    activeBrowserTarget = target;
+    const el = document.getElementById('browser' + cap(target));
+    if (el.classList.contains('open')) {
+      el.classList.remove('open'); activeBrowserTarget = null; return;
+    }
+    // Start from current input value or root drives
+    const inputEl = document.getElementById(target + 'Dir');
+    let startPath = inputEl.value.trim() ||
+                    (target === 'input' ? '' :
+                     document.getElementById('inputDir').value.trim());
+    browserCurrentPath[target] = startPath;
+    renderBrowser(target, startPath);
+    el.classList.add('open');
+  }
+
+  function cap(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+  async function renderBrowser(target, path) {
+    const el = document.getElementById('browser' + cap(target));
+    el.innerHTML = '<div class="mini-browser-header">Loading…</div>';
+
+    if (!path) {
+      // Show common drive letters as starting point
+      el.innerHTML = `
+        <div class="mini-browser-header">Select a drive to start</div>
+        ${['C:\\','D:\\','E:\\','F:\\','Z:\\'].map(d =>
+          `<div class="mini-browser-item" onclick="browseTo('${target}','${d.replace(/\\/g,'\\\\')}')">
+             💾 ${d}
+           </div>`).join('')}`;
+      return;
+    }
+
+    try {
+      const res  = await fetch(`/browse?path=${encodeURIComponent(path)}`);
+      if (!res.ok) {
+        el.innerHTML = `<div class="mini-browser-header">⚠ ${path} — not accessible</div>`;
+        return;
+      }
+      const data = await res.json();
+      browserCurrentPath[target] = path;
+
+      // Build parent path
+      const sep   = path.includes('/') ? '/' : '\\';
+      const parts = path.replace(/[/\\]+$/, '').split(/[/\\]/);
+      const parent = parts.length > 1 ? parts.slice(0, -1).join(sep) : '';
+
+      let html = `<div class="mini-browser-header">${path}</div>`;
+
+      // Select current folder button
+      html += `<div class="mini-browser-item" style="color:#ffe680;border:1px solid rgba(255,230,100,0.2);border-radius:8px;margin-bottom:4px;"
+                    onclick="selectFolder('${target}','${escJs(path)}')">
+                 ✅ Select this folder
+                 ${data.img_count > 0 ? `<span class="mini-browser-badge">${data.img_count} photos</span>` : ''}
+               </div>`;
+
+      if (parent) {
+        html += `<div class="mini-browser-item up" onclick="browseTo('${target}','${escJs(parent)}')">⬆ ..</div>`;
+      }
+
+      if (data.dirs.length === 0) {
+        html += `<div style="color:rgba(200,215,255,0.3);font-size:0.75rem;padding:0.3rem 0.6rem;">No subdirectories</div>`;
+      } else {
+        data.dirs.forEach(d => {
+          html += `<div class="mini-browser-item" onclick="browseTo('${target}','${escJs(d.path)}')">
+                     📁 ${d.name}
+                   </div>`;
+        });
+      }
+
+      el.innerHTML = html;
+    } catch(e) {
+      el.innerHTML = `<div class="mini-browser-header">Error: ${e.message}</div>`;
+    }
+  }
+
+  function browseTo(target, path) {
+    renderBrowser(target, path);
+  }
+
+  function selectFolder(target, path) {
+    const inputEl = document.getElementById(target + 'Dir');
+    inputEl.value = path;
+    document.getElementById('browser' + cap(target)).classList.remove('open');
+    activeBrowserTarget = null;
+    if (target === 'input') {
+      checkInputPath(path);
+      loadGallerySrc();
+    }
+  }
+
+  function escJs(s) { return s.replace(/\\/g, '\\\\').replace(/'/g, "\\'"); }
 
   // ── Tab switching ────────────────────────────────────────────────────────────
   function switchTab(tab) {
     currentTab = tab;
-    document.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('.tab-btn').forEach(b   => b.classList.remove('active'));
     document.querySelectorAll('.tab-panel').forEach(p => p.classList.remove('active'));
-    document.getElementById(tab === 'src' ? 'tabSrc' : 'tabOut').classList.add('active');
-    document.getElementById(tab === 'src' ? 'panelSrc' : 'panelOut').classList.add('active');
-    if (tab === 'out') loadGalleryOut();
+    const btnMap   = { src: 'tabSrc',    out: 'tabOut',    reject: 'tabReject'  };
+    const panelMap = { src: 'panelSrc',  out: 'panelOut',  reject: 'panelReject'};
+    document.getElementById(btnMap[tab]).classList.add('active');
+    document.getElementById(panelMap[tab]).classList.add('active');
+    if (tab === 'out')    loadGalleryOut();
+    if (tab === 'reject') loadGalleryReject();
   }
 
   // ── Galleries ────────────────────────────────────────────────────────────────
   async function loadGallerySrc() {
-    const res = await fetch('/images');
+    const res   = await fetch('/images');
     const files = await res.json();
-    const grid = document.getElementById('gallerySrc');
+    const grid  = document.getElementById('gallerySrc');
     grid.innerHTML = '';
     document.getElementById('statTotal').textContent = files.length || '–';
     if (!files.length) {
-      grid.innerHTML = '<div class="gallery-empty">No photos found.</div>';
+      grid.innerHTML = '<div class="gallery-empty">No photos found in this folder.</div>';
       return;
     }
-    files.forEach(f => {
-      const item = buildGalleryItem(f, `/preview/${f}`, 'src');
-      grid.appendChild(item);
-    });
+    files.forEach(f => { grid.appendChild(buildGalleryItem(f, `/preview/${f}`, 'src')); });
   }
 
   async function loadGalleryOut() {
-    const res = await fetch('/images/centered');
+    const res   = await fetch('/images/centered');
     const files = await res.json();
-    const grid = document.getElementById('galleryOut');
+    const grid  = document.getElementById('galleryOut');
     grid.innerHTML = '';
     if (!files.length) {
       grid.innerHTML = '<div class="gallery-empty">No centered images yet. Run centering first.</div>';
       return;
     }
-    files.forEach(f => {
-      const item = buildGalleryItem(f, `/preview_centered/${f}`, 'out');
-      grid.appendChild(item);
-    });
+    files.forEach(f => { grid.appendChild(buildGalleryItem(f, `/preview_centered/${f}`, 'out')); });
+  }
+
+  async function loadGalleryReject() {
+    const res   = await fetch('/images/rejected');
+    const files = await res.json();
+    const grid  = document.getElementById('galleryReject');
+    grid.innerHTML = '';
+    if (!files.length) {
+      grid.innerHTML = '<div class="gallery-empty">No rejected images.</div>';
+      return;
+    }
+    files.forEach(f => { grid.appendChild(buildGalleryItem(f, `/preview_rejected/${f}`, 'reject')); });
   }
 
   function buildGalleryItem(fname, src, type) {
     const item = document.createElement('div');
     item.className = 'gallery-item';
     item.innerHTML = `<img src="${src}" loading="lazy" alt="${fname}"/><div class="fname-overlay">${fname}</div>`;
-    item.onclick = () => openLightbox(src, fname, type);
+    item.onclick   = () => openLightbox(src, fname, type);
     return item;
   }
 
   // ── Lightbox ─────────────────────────────────────────────────────────────────
   function openLightbox(src, label, type) {
     currentFile = label;
-    // Reset to single view
-    document.getElementById('lbSingle').style.display   = 'flex';
+    document.getElementById('lbSingle').style.display = 'flex';
     document.getElementById('lbCompare').classList.remove('show');
     document.getElementById('lightbox-label-cmp').style.display = 'none';
-
     document.getElementById('lightboxImg').src = src;
     document.getElementById('lightbox-label').textContent = label;
 
-    // Show compare button only for source photos (if centered version may exist)
     const toggle = document.getElementById('compareToggle');
-    if (type === 'src') {
-      toggle.classList.remove('hidden');
-    } else {
-      toggle.classList.add('hidden');
-    }
+    toggle.classList.toggle('hidden', type !== 'src');
 
     document.getElementById('lightbox').classList.add('open');
   }
@@ -457,7 +709,7 @@
     if (!currentFile) return;
     document.getElementById('lbBefore').src = `/preview/${currentFile}`;
     document.getElementById('lbAfter').src  = `/preview_centered/${currentFile}`;
-    document.getElementById('lbSingle').style.display   = 'none';
+    document.getElementById('lbSingle').style.display = 'none';
     document.getElementById('lbCompare').classList.add('show');
     document.getElementById('lightbox-label-cmp').textContent = currentFile;
     document.getElementById('lightbox-label-cmp').style.display = 'block';
@@ -466,8 +718,8 @@
   function closeLightbox() {
     document.getElementById('lightbox').classList.remove('open');
     document.getElementById('lightboxImg').src = '';
-    document.getElementById('lbBefore').src = '';
-    document.getElementById('lbAfter').src  = '';
+    document.getElementById('lbBefore').src    = '';
+    document.getElementById('lbAfter').src     = '';
     currentFile = null;
   }
 
@@ -478,18 +730,40 @@
 
   // ── Processing ───────────────────────────────────────────────────────────────
   async function startProcessing() {
+    const inputDir  = document.getElementById('inputDir').value.trim();
+    const outputDir = document.getElementById('outputDir').value.trim();
+    const rejectDir = document.getElementById('rejectDir').value.trim();
+
+    if (!inputDir) {
+      alert('Please enter an input folder path first.');
+      return;
+    }
+
     const btn = document.getElementById('startBtn');
     btn.disabled = true;
-    knownResults = 0;
+    knownResults  = 0;
     document.getElementById('resultList').innerHTML = '';
 
-    const res = await fetch('/start', { method: 'POST' });
+    const res = await fetch('/start', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ input_dir: inputDir, output_dir: outputDir, reject_dir: rejectDir })
+    });
+
     if (!res.ok) {
       const data = await res.json();
       alert(data.error || 'Failed to start');
       btn.disabled = false;
       return;
     }
+
+    const info = await res.json();
+    // Reflect resolved paths back into the fields
+    if (info.output_dir) document.getElementById('outputDir').value = info.output_dir;
+    if (info.reject_dir) document.getElementById('rejectDir').value = info.reject_dir;
+
+    // Load source gallery now that paths are known
+    loadGallerySrc();
     pollStatus();
   }
 
@@ -504,30 +778,32 @@
         } else {
           document.getElementById('startBtn').disabled = false;
           loadGalleryOut();
-          if (currentTab === 'out') loadGalleryOut();
+          if (currentTab === 'reject') loadGalleryReject();
         }
       })
       .catch(() => { pollTimer = setTimeout(pollStatus, 1500); });
   }
 
-  const statusIcons = { ok: '✅', skipped: '⚠️', error: '❌' };
+  const statusIcons = { ok: '✅', skipped: '⚠️', rejected: '🚫', error: '❌' };
 
   function updateUI(data) {
     const total   = data.total   || 0;
     const done    = data.done    || 0;
     const results = data.results || [];
 
-    const okCount   = results.filter(r => r.status === 'ok').length;
-    const skipCount = results.filter(r => r.status !== 'ok').length;
+    const okCount     = results.filter(r => r.status === 'ok').length;
+    const rejectCount = results.filter(r => r.status === 'rejected').length;
+    const skipCount   = results.filter(r => r.status !== 'ok' && r.status !== 'rejected').length;
 
-    document.getElementById('statTotal').textContent = total   || '–';
-    document.getElementById('statDone').textContent  = done;
-    document.getElementById('statOk').textContent    = okCount;
-    document.getElementById('statSkip').textContent  = skipCount;
+    document.getElementById('statTotal').textContent  = total   || '–';
+    document.getElementById('statDone').textContent   = done;
+    document.getElementById('statOk').textContent     = okCount;
+    document.getElementById('statReject').textContent = rejectCount;
+    document.getElementById('statSkip').textContent   = skipCount;
 
     const pct = total ? Math.round((done / total) * 100) : 0;
-    document.getElementById('progressFill').style.width   = pct + '%';
-    document.getElementById('progressPct').textContent     = pct + '%';
+    document.getElementById('progressFill').style.width  = pct + '%';
+    document.getElementById('progressPct').textContent    = pct + '%';
 
     const badge = document.getElementById('statusBadge');
     if (data.running) {
@@ -540,7 +816,7 @@
 
     const list = document.getElementById('resultList');
     for (let i = knownResults; i < results.length; i++) {
-      const r = results[i];
+      const r   = results[i];
       const row = document.createElement('div');
       row.className = 'result-row';
       row.style.animationDelay = ((i - knownResults) * 0.05) + 's';
@@ -554,9 +830,6 @@
     }
     knownResults = results.length;
   }
-
-  // Init
-  loadGallerySrc();
 </script>
 </body>
 </html>

@@ -4,10 +4,14 @@ import numpy as np
 from flask import Flask, jsonify, send_from_directory, request, Response
 import threading
 
+try:
+    import piexif
+    HAS_PIEXIF = True
+except ImportError:
+    HAS_PIEXIF = False
+
 app = Flask(__name__, static_folder=".")
 
-INPUT_DIR = os.path.dirname(os.path.abspath(__file__))
-OUTPUT_DIR = os.path.join(INPUT_DIR, "centered")
 VALID_EXTS = (".jpg", ".jpeg", ".png", ".JPG", ".JPEG", ".PNG")
 
 processing_state = {
@@ -15,18 +19,68 @@ processing_state = {
     "total": 0,
     "done": 0,
     "results": [],
-    "error": None
+    "error": None,
+    "input_dir": "",
+    "output_dir": "",
+    "reject_dir": "",
 }
+
+
+# ── EXIF helpers ──────────────────────────────────────────────────────────────
+
+def get_focal_length(fpath):
+    """Return focal length in mm as a float, or None if unavailable."""
+    if not HAS_PIEXIF:
+        return None
+    try:
+        exif = piexif.load(fpath)
+        fl = exif.get("Exif", {}).get(piexif.ExifIFD.FocalLength)
+        if fl and fl[1] != 0:
+            return fl[0] / fl[1]
+    except Exception:
+        pass
+    return None
+
+
+# ── Moon detection ────────────────────────────────────────────────────────────
+
+def sample_background_color(img_bgr, cx, cy, radius, sample_margin=60):
+    """
+    Sample the dominant background color near the edges of the image,
+    away from the moon.  Returns a BGR tuple.
+    """
+    h, w = img_bgr.shape[:2]
+    # Build a mask of pixels far from the moon center
+    yy, xx = np.mgrid[0:h, 0:w]
+    dist = np.sqrt((xx - cx) ** 2 + (yy - cy) ** 2)
+    bg_mask = (dist > radius + sample_margin).astype(np.uint8)
+
+    pixels = img_bgr[bg_mask == 1]
+    if len(pixels) == 0:
+        # Fallback: sample all four corners
+        corners = [
+            img_bgr[:50, :50].reshape(-1, 3),
+            img_bgr[:50, -50:].reshape(-1, 3),
+            img_bgr[-50:, :50].reshape(-1, 3),
+            img_bgr[-50:, -50:].reshape(-1, 3),
+        ]
+        pixels = np.vstack(corners)
+
+    # Use median for robustness against outliers
+    b, g, r = (int(np.median(pixels[:, 0])),
+                int(np.median(pixels[:, 1])),
+                int(np.median(pixels[:, 2])))
+    return (b, g, r)
 
 
 def find_moon_center(img_bgr):
     """
-    Detect the moon in blue-sky daytime photos.
+    Detect the moon in the photo.
 
     Strategy:
-    1. HSV saturation mask — the moon is grayish/white (low sat) while the
-       blue sky has high saturation. This isolates the moon blob nicely.
-    2. Hough Circle Transform on the masked area for robust circle detection.
+    1. HSV saturation mask — the moon is grayish/white (low sat) while
+       blue sky has high saturation.
+    2. Hough Circle Transform on the masked area.
     3. Contour circularity fallback if Hough yields nothing.
     """
     h, w = img_bgr.shape[:2]
@@ -36,12 +90,10 @@ def find_moon_center(img_bgr):
     v = hsv[:, :, 2]   # value / brightness
 
     # Moon: low saturation + reasonably bright
-    # Blue sky: high saturation
     low_sat  = (s < 70).astype(np.uint8) * 255
     bright   = (v > 60).astype(np.uint8) * 255
     moon_mask = cv2.bitwise_and(low_sat, bright)
 
-    # Morphological cleanup to fill holes and remove noise
     kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (21, 21))
     moon_mask = cv2.morphologyEx(moon_mask, cv2.MORPH_CLOSE, kernel)
     kernel_sm = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (11, 11))
@@ -49,12 +101,12 @@ def find_moon_center(img_bgr):
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    # ── Attempt 1: Hough circles on saturation-masked gray image ──────────────
+    # ── Attempt 1: Hough on saturation-masked gray ────────────────────────────
     masked_gray = cv2.bitwise_and(gray, moon_mask)
     blurred = cv2.GaussianBlur(masked_gray, (13, 13), 2)
 
     min_r = max(30, min(h, w) // 50)
-    max_r = int(min(h, w) * 0.8) # Increased range for large moons
+    max_r = int(min(h, w) * 0.8)
 
     circles = cv2.HoughCircles(
         blurred,
@@ -62,17 +114,15 @@ def find_moon_center(img_bgr):
         dp=1.2,
         minDist=min(h, w) // 4,
         param1=40,
-        param2=30, # Slightly more stringent to avoid noise
+        param2=30,
         minRadius=min_r,
         maxRadius=max_r,
     )
-
     if circles is not None:
-        # Pick the circle with highest accumulated votes
         cx, cy, r = circles[0][0]
         return (int(cx), int(cy)), int(r)
 
-    # ── Attempt 2: Hough circles on full blurred gray ────────────────────────
+    # ── Attempt 2: Hough on full blurred gray ────────────────────────────────
     blurred_full = cv2.GaussianBlur(gray, (17, 17), 3)
     circles2 = cv2.HoughCircles(
         blurred_full,
@@ -88,7 +138,7 @@ def find_moon_center(img_bgr):
         cx, cy, r = circles2[0][0]
         return (int(cx), int(cy)), int(r)
 
-    # ── Attempt 3: largest circular contour from mask ─────────────────────────
+    # ── Attempt 3: largest circular contour from mask ────────────────────────
     contours, _ = cv2.findContours(moon_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None, None
@@ -106,7 +156,6 @@ def find_moon_center(img_bgr):
         candidates.append((circularity, area, cnt))
 
     if candidates:
-        # Prefer most circular; break ties by largest area
         candidates.sort(key=lambda x: (x[0], x[1]), reverse=True)
         chosen = candidates[0][2]
     else:
@@ -116,26 +165,36 @@ def find_moon_center(img_bgr):
     return (int(cx), int(cy)), int(radius)
 
 
-def center_image(img, cx, cy):
-    """Translate the image so the moon center sits at the canvas center."""
+def center_image(img, cx, cy, radius, bg_color):
+    """
+    Translate so moon center lands at canvas center.
+    Fill the revealed gap with the sampled background color.
+    """
     h, w = img.shape[:2]
     dx = w // 2 - cx
     dy = h // 2 - cy
     M = np.float32([[1, 0, dx], [0, 1, dy]])
-    return cv2.warpAffine(img, M, (w, h), borderValue=(0, 0, 0))
+    # borderValue fills the gap with the background color
+    return cv2.warpAffine(img, M, (w, h), borderValue=bg_color)
 
 
-def process_images():
+# ── Processing thread ─────────────────────────────────────────────────────────
+
+def process_images(input_dir, output_dir, reject_dir):
     global processing_state
-    os.makedirs(OUTPUT_DIR, exist_ok=True)
-    image_files = sorted([f for f in os.listdir(INPUT_DIR) if f.endswith(VALID_EXTS)])
+    os.makedirs(output_dir, exist_ok=True)
+    os.makedirs(reject_dir, exist_ok=True)
+
+    image_files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(VALID_EXTS)])
     processing_state["total"] = len(image_files)
     processing_state["done"] = 0
     processing_state["results"] = []
     processing_state["error"] = None
 
+    reference_fl = None   # focal length of first successfully read image
+
     for fname in image_files:
-        fpath = os.path.join(INPUT_DIR, fname)
+        fpath = os.path.join(input_dir, fname)
         try:
             img = cv2.imread(fpath)
             if img is None:
@@ -145,6 +204,24 @@ def process_images():
                 processing_state["done"] += 1
                 continue
 
+            # ── Focal-length check ────────────────────────────────────────────
+            fl = get_focal_length(fpath)
+            if fl is not None:
+                if reference_fl is None:
+                    reference_fl = fl
+                elif abs(fl - reference_fl) > 0.5:
+                    # Different focal length → reject
+                    import shutil
+                    shutil.copy2(fpath, os.path.join(reject_dir, fname))
+                    processing_state["results"].append({
+                        "file": fname,
+                        "status": "rejected",
+                        "msg": f"Focal length {fl:.1f}mm ≠ {reference_fl:.1f}mm"
+                    })
+                    processing_state["done"] += 1
+                    continue
+
+            # ── Detect moon ───────────────────────────────────────────────────
             moon_center, radius = find_moon_center(img)
 
             if moon_center is None:
@@ -152,15 +229,20 @@ def process_images():
                     {"file": fname, "status": "skipped", "msg": "Moon not detected"}
                 )
             else:
-                centered = center_image(img, moon_center[0], moon_center[1])
-                out_path = os.path.join(OUTPUT_DIR, fname)
+                cx, cy = moon_center
+                # Sample background color before shifting
+                bg_color = sample_background_color(img, cx, cy, radius)
+                centered = center_image(img, cx, cy, radius, bg_color)
+                out_path = os.path.join(output_dir, fname)
                 cv2.imwrite(out_path, centered)
                 h, w = img.shape[:2]
+                fl_str = f"{fl:.1f}mm" if fl else "N/A"
                 processing_state["results"].append({
                     "file": fname,
                     "status": "ok",
-                    "msg": f"Moon at ({moon_center[0]}, {moon_center[1]}), r={radius}px",
-                    "offset": [w // 2 - moon_center[0], h // 2 - moon_center[1]]
+                    "msg": (f"Moon ({cx},{cy}) r={radius}px | "
+                            f"shift ({w//2-cx},{h//2-cy}) | fl={fl_str}"),
+                    "offset": [w // 2 - cx, h // 2 - cy]
                 })
         except Exception as e:
             processing_state["results"].append(
@@ -184,10 +266,33 @@ def start():
     global processing_state
     if processing_state["running"]:
         return jsonify({"error": "Already running"}), 400
-    processing_state["running"] = True
-    t = threading.Thread(target=process_images, daemon=True)
+
+    data = request.get_json(silent=True) or {}
+    input_dir  = data.get("input_dir", "").strip()
+    output_dir = data.get("output_dir", "").strip()
+    reject_dir = data.get("reject_dir", "").strip()
+
+    if not input_dir or not os.path.isdir(input_dir):
+        return jsonify({"error": "Invalid input directory"}), 400
+
+    if not output_dir:
+        output_dir = os.path.join(input_dir, "centered")
+    if not reject_dir:
+        reject_dir = os.path.join(input_dir, "reject")
+
+    processing_state["running"]    = True
+    processing_state["input_dir"]  = input_dir
+    processing_state["output_dir"] = output_dir
+    processing_state["reject_dir"] = reject_dir
+
+    t = threading.Thread(
+        target=process_images,
+        args=(input_dir, output_dir, reject_dir),
+        daemon=True
+    )
     t.start()
-    return jsonify({"status": "started"})
+    return jsonify({"status": "started", "input_dir": input_dir,
+                    "output_dir": output_dir, "reject_dir": reject_dir})
 
 
 @app.route("/status")
@@ -195,17 +300,48 @@ def status():
     return jsonify(processing_state)
 
 
+@app.route("/browse")
+def browse():
+    """List subdirectories (and image counts) for a given path."""
+    path = request.args.get("path", "").strip()
+    if not path or not os.path.isdir(path):
+        return jsonify({"error": "Invalid path"}), 400
+    entries = []
+    try:
+        for name in sorted(os.listdir(path)):
+            full = os.path.join(path, name)
+            if os.path.isdir(full):
+                entries.append({"name": name, "path": full})
+    except PermissionError:
+        return jsonify({"error": "Permission denied"}), 403
+    img_count = len([f for f in os.listdir(path) if f.lower().endswith(VALID_EXTS)])
+    return jsonify({"path": path, "dirs": entries, "img_count": img_count})
+
+
 @app.route("/images")
 def images():
-    files = sorted([f for f in os.listdir(INPUT_DIR) if f.endswith(VALID_EXTS)])
+    input_dir = processing_state.get("input_dir", "")
+    if not input_dir or not os.path.isdir(input_dir):
+        return jsonify([])
+    files = sorted([f for f in os.listdir(input_dir) if f.lower().endswith(VALID_EXTS)])
     return jsonify(files)
 
 
 @app.route("/images/centered")
 def images_centered():
-    if not os.path.isdir(OUTPUT_DIR):
+    output_dir = processing_state.get("output_dir", "")
+    if not output_dir or not os.path.isdir(output_dir):
         return jsonify([])
-    files = sorted([f for f in os.listdir(OUTPUT_DIR) if f.endswith(VALID_EXTS)])
+    files = sorted([f for f in os.listdir(output_dir) if f.lower().endswith(VALID_EXTS)])
+    return jsonify(files)
+
+
+@app.route("/images/rejected")
+def images_rejected():
+    reject_dir = processing_state.get("reject_dir", "")
+    if not reject_dir or not os.path.isdir(reject_dir):
+        return jsonify([])
+    files = sorted([f for f in os.listdir(reject_dir) if f.lower().endswith(VALID_EXTS)])
     return jsonify(files)
 
 
@@ -222,12 +358,26 @@ def _serve_thumb(path, size=400):
 
 @app.route("/preview/<path:fname>")
 def preview(fname):
-    return _serve_thumb(os.path.join(INPUT_DIR, fname))
+    input_dir = processing_state.get("input_dir", "")
+    if not input_dir:
+        return "No input dir set", 400
+    return _serve_thumb(os.path.join(input_dir, fname))
 
 
 @app.route("/preview_centered/<path:fname>")
 def preview_centered(fname):
-    return _serve_thumb(os.path.join(OUTPUT_DIR, fname))
+    output_dir = processing_state.get("output_dir", "")
+    if not output_dir:
+        return "No output dir set", 400
+    return _serve_thumb(os.path.join(output_dir, fname))
+
+
+@app.route("/preview_rejected/<path:fname>")
+def preview_rejected(fname):
+    reject_dir = processing_state.get("reject_dir", "")
+    if not reject_dir:
+        return "No reject dir set", 400
+    return _serve_thumb(os.path.join(reject_dir, fname))
 
 
 if __name__ == "__main__":
