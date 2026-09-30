@@ -4,7 +4,7 @@ A local web utility that automatically detects and centers the moon in a series 
 Centered results are saved to a configurable output folder (default: `centered/` under the source path).  
 Photos with a different focal length are automatically moved to a `reject/` folder.
 
-![center moon](https://github.com/inchinet/mon-phase/blob/main/screen.png)
+![center moon](https://github.com/inchinet/moon-phase/blob/main/screen.png)
 ---
 
 ## 🚀 Quick Start
