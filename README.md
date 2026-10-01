@@ -116,3 +116,10 @@ No additional installation needed — `piexif` is already installed in the share
 - For **night photos**, ensure the moon is reasonably bright relative to the surroundings (avoid shots dominated by very bright foreground lights).
 - **Background fill** matches the sky colour automatically — no manual adjustment needed.
 - Centered output images keep the **exact same filename** as the source, preserving the sequence order for timelapse assembly.
+## Implementation update
+
+The current centering implementation first finds a candidate circle with OpenCV, then refines the moon centre from the visible lunar limb arc with a robust algebraic circle fit. This is important when the moon is close to or partly outside the image edge: the visible arc can still be used to extrapolate the complete circle centre.
+
+The batch uses one consensus moon radius for the output sequence, while each photo retains its own fitted centre. Photos with a mismatched EXIF focal length are copied to `reject/`; when EXIF data is missing, a substantial mismatch in detected moon radius is used as the practical focal-length/zoom check. Skipped images are logged when no reliable moon circle can be found.
+
+The GUI default input path is `E:\AI\codex\moon-phase\input`. Output defaults to `<input>\centered`, rejected images default to `<input>\reject`, and output files retain their original names and exact source dimensions.

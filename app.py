@@ -1,4 +1,5 @@
 import os
+import shutil
 import cv2
 import numpy as np
 from flask import Flask, jsonify, send_from_directory, request, Response
@@ -130,6 +131,66 @@ def _best_supported_circle(circles, edges, min_r, max_r):
     return best_circ
 
 
+def _fit_limb_circle(img_bgr, seed, expected_r=None):
+    """Refine a circle from the moon's visible limb, including clipped arcs.
+
+    HoughCircles is useful for finding a starting point, but its accumulator can
+    be biased by the bright halo or by the moon's internal texture.  This fit
+    uses only strong edge pixels near the candidate circumference and repeatedly
+    removes outliers.  Because the fit is geometric, the centre can be recovered
+    even when part of the disc is outside the source frame.
+    """
+    h, w = img_bgr.shape[:2]
+    scale = min(1.0, 1600.0 / max(h, w))
+    small = cv2.resize(img_bgr, (max(1, int(w * scale)), max(1, int(h * scale))))
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (5, 5), 1.2)
+    edges = cv2.Canny(gray, 15, 55)
+
+    sx, sy, sr = [float(v) * scale for v in (*seed[:2], seed[2])]
+    target_r = float(expected_r or sr) * scale
+    band = max(10.0, target_r * 0.075)
+    ys, xs = np.nonzero(edges)
+    if len(xs) < 20:
+        return None
+    distances = np.hypot(xs - sx, ys - sy)
+    keep = (distances >= target_r - band) & (distances <= target_r + band)
+    points = np.column_stack((xs[keep], ys[keep])).astype(np.float64)
+    if len(points) < 20:
+        return None
+
+    def algebraic_fit(p):
+        # x^2+y^2 + D*x + E*y + F = 0
+        A = np.column_stack((p[:, 0], p[:, 1], np.ones(len(p))))
+        b = -(p[:, 0] ** 2 + p[:, 1] ** 2)
+        coef, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+        cx, cy = -coef[0] / 2.0, -coef[1] / 2.0
+        radius_sq = cx * cx + cy * cy - coef[2]
+        return cx, cy, np.sqrt(max(0.0, radius_sq))
+
+    # Three robust passes. Restrict the radius so unrelated sky edges cannot
+    # pull the solution away from the common focal-length scale.
+    fit = None
+    work = points
+    for _ in range(3):
+        if len(work) < 12:
+            return None
+        fit = algebraic_fit(work)
+        cx, cy, radius = fit
+        residual = np.abs(np.hypot(work[:, 0] - cx, work[:, 1] - cy) - radius)
+        limit = max(3.0, min(target_r * 0.035, np.median(residual) * 3.0 + 2.0))
+        work = work[residual <= limit]
+
+    if fit is None:
+        return None
+    cx, cy, radius = fit
+    if radius < target_r * 0.85 or radius > target_r * 1.15:
+        return None
+    # Keep the fitted centre at sub-pixel precision.  Rounding here can leave
+    # a visible one-pixel registration error after translation.
+    return (cx / scale, cy / scale, radius / scale)
+
+
 def find_moon_center(img_bgr, fixed_r=None):
     """
     Find the true geometric centre of the moon disc.
@@ -154,7 +215,8 @@ def find_moon_center(img_bgr, fixed_r=None):
 
     result = _hough_detect(img_bgr, min_r, max_r)
     if result is not None:
-        cx, cy, r = result
+        refined = _fit_limb_circle(img_bgr, result, expected_r=fixed_r)
+        cx, cy, r = refined if refined is not None else result
         return (cx, cy), r
 
     return None, None
@@ -209,7 +271,6 @@ def process_images(input_dir, output_dir, reject_dir):
                 if reference_fl is None:
                     reference_fl = fl
                 elif abs(fl - reference_fl) > 0.5:
-                    import shutil
                     shutil.copy2(fpath, os.path.join(reject_dir, fname))
                     processing_state["results"].append({
                         "file": fname, "status": "rejected",
@@ -241,6 +302,25 @@ def process_images(input_dir, output_dir, reject_dir):
     all_radii   = [d["r"] for d in detections.values()]
     consensus_r = int(round(np.median(all_radii)))
 
+    # EXIF is often stripped by editors. In that case, the common pixel radius
+    # is the practical focal-length check for one fixed camera/zoom sequence.
+    # Keep a generous tolerance for limb-fit noise, but reject clear outliers.
+    radius_tolerance = max(35, int(consensus_r * 0.08))
+    for fname, det in list(detections.items()):
+        if abs(det["r"] - consensus_r) > radius_tolerance:
+            shutil.copy2(os.path.join(input_dir, fname), os.path.join(reject_dir, fname))
+            processing_state["results"].append({
+                "file": fname, "status": "rejected",
+                "msg": (f"Moon radius {det['r']}px differs from shared "
+                        f"radius {consensus_r}px; likely focal-length change")
+            })
+            processing_state["done"] += 1
+            del detections[fname]
+
+    if not detections:
+        processing_state["running"] = False
+        return
+
     processing_state["results"].append({
         "file": "__consensus__",
         "status": "info",
@@ -255,7 +335,8 @@ def process_images(input_dir, output_dir, reject_dir):
             fl  = det["fl"]
             h, w = img.shape[:2]
 
-            # Re-detect with tight radius window for accuracy
+            # Re-detect with the shared radius window. The arc fit returns a
+            # per-image centre; only the radius used for the output is shared.
             moon_center2, r2 = find_moon_center(img, fixed_r=consensus_r)
             if moon_center2 is not None:
                 cx, cy = moon_center2
