@@ -47,21 +47,20 @@ The UI lets you specify any source folder on your system via text input or the *
 - If a photo has no EXIF focal length data, the check is skipped and it is processed normally.
 
 ### 🌑 Moon Detection
-The detection pipeline runs four passes and uses the first that succeeds:
+The detection pipeline finds the true geometric centre of the moon disc — even when it is **partially clipped** at the frame edge (e.g. a large gibbous moon filling most of the frame):
 
-1. **HSV colour segmentation** — Converts to HSV colour space. The moon is grey/white (low saturation); sky is blue (high saturation). A saturation + brightness mask isolates the moon blob.
-2. **Morphological cleanup** — Fills holes in the moon disc and removes small noise.
-3. **Mask centroid (ground-truth reference)** — The largest blob in the mask is found and its **moment centroid** is computed. This is used as a validation anchor for all subsequent steps — the most reliable estimate for any moon phase (full disc, crescent, gibbous).
-4. **Hough Circle Transform (masked)** — Runs on the saturation-masked grayscale image. Each returned circle is **validated** against the mask centroid; circles that deviate by more than 1× blob radius are rejected.
-5. **Hough Circle Transform (full image)** — Looser second pass on raw grayscale, also validated against the mask centroid.
-6. **Mask centroid fallback** — If no Hough circle passes validation, the mask centroid is used directly as the moon centre.
-7. **Contour moment centroid fallback** — Uses **moment centroid** (not minEnclosingCircle centre, which is inaccurate for crescents) of the most circular contour as a last resort.
+1. **HSV colour segmentation** — Converts to HSV colour space. The moon is grey/white (low saturation + bright); sky is more saturated blue. A combined mask isolates the moon blob.
+2. **Morphological cleanup** — `MORPH_CLOSE` fills interior holes; `MORPH_OPEN` removes small noise blobs.
+3. **Limb edge extraction** — The inner and outer boundary pixels of the moon blob are extracted. Border-touching edges are excluded (they form straight lines, not arcs).
+4. **Algebraic circle fit (primary)** — A least-squares circle fit is applied to the limb edge points. This solves for `cx`, `cy`, and `r` algebraically — correctly extrapolating the disc centre even when part of the moon is outside the frame. Fit quality is validated by checking residuals.
+5. **Hough Circle Transform fallback** — If the edge fit fails, Hough is run on the masked grayscale image, with each candidate circle validated against the mask blob centroid.
+6. **Mask centroid fallback** — If Hough also fails, the moment centroid of the largest blob is used directly.
 
 ### 🎯 Centering & Background Fill
-6. **Background sampling** — Median colour of pixels far from the moon is sampled to determine the scene background (e.g. blue sky, black night sky).
-7. **Translation** — Image is shifted so the detected centre `(cx, cy)` aligns with the canvas centre.
-8. **Gap fill** — The revealed border after shifting is filled with the **sampled background colour** (not a hard black). Blue sky stays blue; dark sky stays dark.
-9. **Save** — Centered image written to the output folder with the **original filename**.
+7. **Background sampling** — Sky colour is sampled from an annular ring of pixels **just outside the moon's edge** (radius+20 to radius+120 px). These pixels are guaranteed to be sky, giving an accurate fill colour even when the moon fills most of the frame.
+8. **Translation** — Image is shifted so the detected centre `(cx, cy)` aligns with the canvas centre.
+9. **Gap fill** — The revealed border after shifting is filled with the **sampled sky colour**. Blue sky stays blue; dark sky stays dark.
+10. **Save** — Centered image written to the output folder with the **original filename**.
 
 All output images keep the **exact same resolution** as the source.
 
@@ -90,7 +89,7 @@ All output images keep the **exact same resolution** as the source.
 | **Heavy overcast / fog** | If the moon is barely visible behind thick clouds, detection may fail. |
 | **One dominant object** | Only the best-matching circle/contour is treated as the moon. Bright lamps or sun glare near the moon can confuse detection. |
 | **No zoom/scale change** | The tool only **translates** (shifts) — it does not resize or crop. Output resolution equals input resolution. |
-| **Moon near edge** | If the moon is very close to the image border, the shifted version may show a narrow background-filled band. |
+| **Moon near edge / large moon** | If the moon disc extends beyond the frame edge, the shifted output will show a background-filled band on the opposite side. The fill colour is sampled from sky pixels near the moon's edge for a natural look. |
 | **Supported formats** | `.jpg`, `.jpeg`, `.png` (case-insensitive). RAW files (`.CR2`, `.NEF`, etc.) are **not** supported. |
 | **Local only** | The server binds to `127.0.0.1` — not accessible over the network. |
 | **No overwrite warning** | Re-running will silently overwrite files already in the output folder. |
@@ -112,7 +111,7 @@ No additional installation needed — `piexif` is already installed in the share
 
 ## 📝 Tips
 
-- If a photo is marked **⚠️ skipped (Moon not detected)**, the moon may be very small, heavily obscured, or partially cropped out of frame.
+- If a photo is marked **⚠️ skipped (Moon not detected)**, the moon may be very small, heavily obscured, or its edge arc too faint for the circle fit to converge.
 - For **daytime photos**, a clear blue sky gives the best detection results — the algorithm relies on the saturation contrast between the grey moon and the blue sky.
 - For **night photos**, ensure the moon is reasonably bright relative to the surroundings (avoid shots dominated by very bright foreground lights).
 - **Background fill** matches the sky colour automatically — no manual adjustment needed.
