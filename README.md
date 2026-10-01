@@ -47,13 +47,15 @@ The UI lets you specify any source folder on your system via text input or the *
 - If a photo has no EXIF focal length data, the check is skipped and it is processed normally.
 
 ### 🌑 Moon Detection
-The detection pipeline runs three passes and uses the first that succeeds:
+The detection pipeline runs four passes and uses the first that succeeds:
 
 1. **HSV colour segmentation** — Converts to HSV colour space. The moon is grey/white (low saturation); sky is blue (high saturation). A saturation + brightness mask isolates the moon blob.
 2. **Morphological cleanup** — Fills holes in the moon disc and removes small noise.
-3. **Hough Circle Transform (masked)** — Runs on the saturation-masked grayscale image.
-4. **Hough Circle Transform (full image)** — Looser second pass on raw grayscale.
-5. **Contour circularity fallback** — Picks the most circular contour from the mask.
+3. **Mask centroid (ground-truth reference)** — The largest blob in the mask is found and its **moment centroid** is computed. This is used as a validation anchor for all subsequent steps — the most reliable estimate for any moon phase (full disc, crescent, gibbous).
+4. **Hough Circle Transform (masked)** — Runs on the saturation-masked grayscale image. Each returned circle is **validated** against the mask centroid; circles that deviate by more than 1× blob radius are rejected.
+5. **Hough Circle Transform (full image)** — Looser second pass on raw grayscale, also validated against the mask centroid.
+6. **Mask centroid fallback** — If no Hough circle passes validation, the mask centroid is used directly as the moon centre.
+7. **Contour moment centroid fallback** — Uses **moment centroid** (not minEnclosingCircle centre, which is inaccurate for crescents) of the most circular contour as a last resort.
 
 ### 🎯 Centering & Background Fill
 6. **Background sampling** — Median colour of pixels far from the moon is sampled to determine the scene background (e.g. blue sky, black night sky).

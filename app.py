@@ -78,10 +78,12 @@ def find_moon_center(img_bgr):
     Detect the moon in the photo.
 
     Strategy:
-    1. HSV saturation mask — the moon is grayish/white (low sat) while
+    1. HSV saturation mask: the moon is grayish/white (low sat) while
        blue sky has high saturation.
-    2. Hough Circle Transform on the masked area.
-    3. Contour circularity fallback if Hough yields nothing.
+    2. Compute mask blob centroid as ground-truth reference center.
+    3. Hough Circle Transform, validated against the mask centroid.
+    4. Fall back to mask centroid if Hough deviates too far.
+    5. Contour moment centroid as last resort.
     """
     h, w = img_bgr.shape[:2]
     hsv = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2HSV)
@@ -101,12 +103,16 @@ def find_moon_center(img_bgr):
 
     gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
 
-    # ── Attempt 1: Hough on saturation-masked gray ────────────────────────────
-    masked_gray = cv2.bitwise_and(gray, moon_mask)
-    blurred = cv2.GaussianBlur(masked_gray, (13, 13), 2)
-
     min_r = max(30, min(h, w) // 50)
     max_r = int(min(h, w) * 0.8)
+
+    # Compute mask centroid as ground-truth reference
+    # This is the most reliable center for any moon phase (full, crescent, etc.)
+    mask_cx, mask_cy, mask_r = _largest_blob_centroid(moon_mask, min_r)
+
+    # Attempt 1: Hough on saturation-masked gray
+    masked_gray = cv2.bitwise_and(gray, moon_mask)
+    blurred = cv2.GaussianBlur(masked_gray, (13, 13), 2)
 
     circles = cv2.HoughCircles(
         blurred,
@@ -119,10 +125,12 @@ def find_moon_center(img_bgr):
         maxRadius=max_r,
     )
     if circles is not None:
-        cx, cy, r = circles[0][0]
-        return (int(cx), int(cy)), int(r)
+        best = _pick_best_circle(circles[0], mask_cx, mask_cy, mask_r, h, w)
+        if best is not None:
+            cx, cy, r = best
+            return (int(cx), int(cy)), int(r)
 
-    # ── Attempt 2: Hough on full blurred gray ────────────────────────────────
+    # Attempt 2: Hough on full blurred gray
     blurred_full = cv2.GaussianBlur(gray, (17, 17), 3)
     circles2 = cv2.HoughCircles(
         blurred_full,
@@ -135,10 +143,16 @@ def find_moon_center(img_bgr):
         maxRadius=max_r,
     )
     if circles2 is not None:
-        cx, cy, r = circles2[0][0]
-        return (int(cx), int(cy)), int(r)
+        best = _pick_best_circle(circles2[0], mask_cx, mask_cy, mask_r, h, w)
+        if best is not None:
+            cx, cy, r = best
+            return (int(cx), int(cy)), int(r)
 
-    # ── Attempt 3: largest circular contour from mask ────────────────────────
+    # Attempt 3: use mask centroid directly (most robust fallback)
+    if mask_cx is not None:
+        return (int(mask_cx), int(mask_cy)), int(mask_r)
+
+    # Attempt 4: largest circular contour from mask
     contours, _ = cv2.findContours(moon_mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
     if not contours:
         return None, None
@@ -161,8 +175,71 @@ def find_moon_center(img_bgr):
     else:
         chosen = max(contours, key=cv2.contourArea)
 
-    (cx, cy), radius = cv2.minEnclosingCircle(chosen)
-    return (int(cx), int(cy)), int(radius)
+    # Use moment centroid: more accurate than minEnclosingCircle center
+    # especially for crescent/partial moons
+    M_cnt = cv2.moments(chosen)
+    if M_cnt["m00"] != 0:
+        cx = int(M_cnt["m10"] / M_cnt["m00"])
+        cy = int(M_cnt["m01"] / M_cnt["m00"])
+    else:
+        (cx, cy), _ = cv2.minEnclosingCircle(chosen)
+        cx, cy = int(cx), int(cy)
+    _, radius = cv2.minEnclosingCircle(chosen)
+    return (cx, cy), int(radius)
+
+
+def _largest_blob_centroid(mask, min_r):
+    """
+    Find the largest blob in the binary mask and return its
+    moment centroid (cx, cy) and approximate radius.
+    Returns (None, None, None) if no valid blob found.
+    """
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    if not contours:
+        return None, None, None
+
+    min_area = np.pi * min_r ** 2
+    valid = [c for c in contours if cv2.contourArea(c) >= min_area]
+    if not valid:
+        return None, None, None
+
+    chosen = max(valid, key=cv2.contourArea)
+    M = cv2.moments(chosen)
+    if M["m00"] == 0:
+        return None, None, None
+
+    cx = M["m10"] / M["m00"]
+    cy = M["m01"] / M["m00"]
+    area = M["m00"]
+    radius = np.sqrt(area / np.pi)   # equivalent circle radius
+    return cx, cy, radius
+
+
+def _pick_best_circle(circles, mask_cx, mask_cy, mask_r, h, w):
+    """
+    From a list of Hough circles, pick the one whose center is closest
+    to the mask centroid AND whose radius is plausible.
+    Returns (cx, cy, r) or None if no circle passes validation.
+    """
+    if mask_cx is None:
+        # No mask reference: return the first circle if it is inside the image
+        cx, cy, r = circles[0]
+        if 0 <= cx < w and 0 <= cy < h:
+            return (cx, cy, r)
+        return None
+
+    # Allow the Hough center to deviate up to 1x mask_r from the mask centroid
+    tolerance = max(mask_r * 1.0, 50)
+
+    best = None
+    best_dist = float("inf")
+    for cx, cy, r in circles:
+        dist = np.sqrt((cx - mask_cx) ** 2 + (cy - mask_cy) ** 2)
+        if dist < tolerance and dist < best_dist:
+            best = (cx, cy, r)
+            best_dist = dist
+
+    return best
 
 
 def center_image(img, cx, cy, radius, bg_color):
