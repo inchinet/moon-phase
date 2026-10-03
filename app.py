@@ -191,6 +191,163 @@ def _fit_limb_circle(img_bgr, seed, expected_r=None):
     return (cx / scale, cy / scale, radius / scale)
 
 
+# ── Precise limb fit + stack registration ─────────────────────────────────────
+
+def _moon_mask(gray):
+    """Binary mask of the lit moon (largest bright blob) + the blurred gray."""
+    blur = cv2.GaussianBlur(gray, (0, 0), 2)
+    thr, _ = cv2.threshold(blur, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mask = (blur > thr).astype(np.uint8)
+    n, lab, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+    if n < 2:
+        return None, blur
+    big = 1 + int(np.argmax(stats[1:, cv2.CC_STAT_AREA]))
+    return (lab == big).astype(np.uint8), blur
+
+
+def _algebraic_circle(p):
+    A = np.column_stack((p[:, 0], p[:, 1], np.ones(len(p))))
+    b = -(p[:, 0] ** 2 + p[:, 1] ** 2)
+    c, _, _, _ = np.linalg.lstsq(A, b, rcond=None)
+    cx, cy = -c[0] / 2.0, -c[1] / 2.0
+    return cx, cy, float(np.sqrt(max(cx * cx + cy * cy - c[2], 0.0)))
+
+
+def detect_limb(img_bgr):
+    """Fit a circle to the moon's bright LIMB only.
+
+    The terminator (day/night line) and any part of the disc clipped by the
+    frame edge are excluded, so they cannot drag the centre:
+      * limb pixels lie on the convex hull of the lit area (terminator of a
+        crescent is recessed),
+      * on the limb, brightness falls off radially OUTWARD from the centre;
+        on the terminator it falls off INWARD — checked with the gradient.
+    Returns dict(cx, cy, r, pts, centroid) or None.
+    """
+    gray = cv2.cvtColor(img_bgr, cv2.COLOR_BGR2GRAY)
+    h, w = gray.shape
+    mask, blur = _moon_mask(gray)
+    if mask is None:
+        return None
+    cnts, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+    if not cnts:
+        return None
+    cnt = max(cnts, key=len)
+    pts = cnt[:, 0, :].astype(np.float64)
+    on_frame = ((pts[:, 0] > 3) & (pts[:, 0] < w - 4) &
+                (pts[:, 1] > 3) & (pts[:, 1] < h - 4))
+    pts = pts[on_frame]
+    if len(pts) < 50:
+        return None
+
+    hull = cv2.convexHull(cnt)
+    hull_d = np.array([abs(cv2.pointPolygonTest(hull, (float(x), float(y)), True))
+                       for x, y in pts])
+    seed = pts[hull_d < 2.0]
+    if len(seed) < 30:
+        return None
+    cx, cy, r = _algebraic_circle(seed)
+
+    gx = cv2.Sobel(blur, cv2.CV_64F, 1, 0, ksize=3)
+    gy = cv2.Sobel(blur, cv2.CV_64F, 0, 1, ksize=3)
+    xi, yi = pts[:, 0].astype(int), pts[:, 1].astype(int)
+    nx, ny = -gx[yi, xi], -gy[yi, xi]          # bright -> dark direction
+    nn = np.hypot(nx, ny) + 1e-9
+    sel = None
+    for _ in range(5):
+        rx, ry = pts[:, 0] - cx, pts[:, 1] - cy
+        rr = np.hypot(rx, ry) + 1e-9
+        outward = (nx * rx + ny * ry) / (nn * rr)
+        cur = (outward > 0.85) & (np.abs(rr - r) < max(3.0, r * 0.02))
+        if cur.sum() < 30:
+            break
+        sel = cur
+        cx, cy, r = _algebraic_circle(pts[sel])
+    if sel is None:
+        return None
+
+    M = cv2.moments(mask, True)
+    centroid = (M["m10"] / M["m00"], M["m01"] / M["m00"])
+    return {"cx": cx, "cy": cy, "r": r, "pts": pts[sel], "centroid": centroid}
+
+
+def fit_center_fixed_r(pts, cx, cy, R):
+    """Geometric (Gauss-Newton) centre of a circle whose radius is known.
+
+    Using the shared consensus radius removes the radius/centre ambiguity of a
+    partial arc, which otherwise shifts the centre by several pixels.
+    """
+    for _ in range(30):
+        dx, dy = pts[:, 0] - cx, pts[:, 1] - cy
+        d = np.hypot(dx, dy) + 1e-9
+        J = np.column_stack((-dx / d, -dy / d))
+        step, _, _, _ = np.linalg.lstsq(J, -(d - R), rcond=None)
+        cx, cy = cx + step[0], cy + step[1]
+        if np.hypot(step[0], step[1]) < 1e-4:
+            break
+    return float(cx), float(cy)
+
+
+def _affine3(M):
+    return np.vstack([np.asarray(M, np.float64), [0.0, 0.0, 1.0]])
+
+
+def build_matrix(cx, cy, rot_deg, w, h):
+    """Rotate by rot_deg about the moon centre, then move it to photo centre."""
+    M = cv2.getRotationMatrix2D((float(cx), float(cy)), float(rot_deg), 1.0)
+    M[0, 2] += w / 2.0 - cx
+    M[1, 2] += h / 2.0 - cy
+    return M
+
+
+def refine_stack_alignment(images, mats, w, h, R, iterations=3):
+    """Sub-pixel register every frame to the median stack with ECC.
+
+    Optimises rotation + translation on the moon area itself, which is what
+    AutoStakkert needs. The mean translation is removed so the limb-fit
+    centre stays at the photo centre.
+    """
+    sc = 0.5
+    half = int(R * 1.1)
+    x0, x1 = max(0, int(w // 2 - half)), min(w, int(w // 2 + half))
+    y0, y1 = max(0, int(h // 2 - half)), min(h, int(h // 2 + half))
+    cw, ch = int((x1 - x0) * sc), int((y1 - y0) * sc)
+    C = np.array([[sc, 0, -sc * x0], [0, sc, -sc * y0], [0, 0, 1]], np.float64)
+    C_inv = np.linalg.inv(C)
+    grays = [cv2.GaussianBlur(cv2.cvtColor(im, cv2.COLOR_BGR2GRAY), (0, 0), 1.0)
+             for im in images]
+    crit = (cv2.TERM_CRITERIA_EPS | cv2.TERM_CRITERIA_COUNT, 100, 1e-6)
+    mats = [np.asarray(M, np.float64) for M in mats]
+
+    p0 = np.array([w / 2.0, h / 2.0, 1.0])
+    for _ in range(iterations):
+        smalls = [cv2.warpAffine(g, (C @ _affine3(M))[:2], (cw, ch),
+                                 flags=cv2.INTER_LINEAR).astype(np.float32) / 255.0
+                  for g, M in zip(grays, mats)]
+        ref = np.median(np.stack(smalls), axis=0).astype(np.float32)
+        corr = []
+        for s in smalls:
+            W = np.eye(2, 3, dtype=np.float32)
+            try:
+                _, W = cv2.findTransformECC(ref, s, W, cv2.MOTION_EUCLIDEAN,
+                                            crit, None, 5)
+            except cv2.error:
+                W = np.eye(2, 3, dtype=np.float32)
+            Wf = C_inv @ _affine3(W) @ C          # full-res: ref -> frame
+            Winv = np.linalg.inv(Wf)              # correction to apply to frame
+            rot = np.degrees(np.arctan2(Winv[1, 0], Winv[0, 0]))
+            move = (Winv @ p0 - p0)[:2]           # displacement at photo centre
+            if np.hypot(move[0], move[1]) > R * 0.1 or abs(rot) > 5:
+                Winv = np.eye(3)                  # implausible -> ignore
+            corr.append(Winv)
+        mean_move = np.mean([(c @ p0 - p0)[:2] for c in corr], axis=0)
+        for i, c in enumerate(corr):
+            c = c.copy()
+            c[:2, 2] -= mean_move
+            mats[i] = (c @ _affine3(mats[i]))[:2]
+    return mats
+
+
 def find_moon_center(img_bgr, fixed_r=None):
     """
     Find the true geometric centre of the moon disc.
@@ -231,13 +388,18 @@ def center_image(img, cx, cy, radius, bg_color):
 
 # ── Processing thread ─────────────────────────────────────────────────────────
 
-def process_images(input_dir, output_dir, reject_dir):
+def process_images(input_dir, output_dir, reject_dir, stack_align=True):
     """
     Two-pass processing:
       Pass 1 - detect moon with loose radius range, collect per-image radius.
       Compute consensus_r = median of all detected radii.
       Pass 2 - re-detect moon with radius locked to consensus_r for accuracy,
                then centre every image with the precise consensus radius.
+
+    Pass 1 uses a limb-only fit (terminator / frame edge ignored); pass 2 fits
+    the centre with the shared consensus radius.  When stack_align is True
+    (same-session frames for AutoStakkert), frames are also de-rotated to a
+    common crescent orientation and sub-pixel registered with ECC.
     """
     global processing_state
     os.makedirs(output_dir, exist_ok=True)
@@ -279,7 +441,11 @@ def process_images(input_dir, output_dir, reject_dir):
                     processing_state["done"] += 1
                     continue
 
-            moon_center, radius = find_moon_center(img)
+            limb = detect_limb(img)
+            if limb is not None:
+                moon_center, radius = (limb["cx"], limb["cy"]), limb["r"]
+            else:
+                moon_center, radius = find_moon_center(img)
             if moon_center is None:
                 processing_state["results"].append(
                     {"file": fname, "status": "skipped", "msg": "Moon not detected"})
@@ -287,7 +453,7 @@ def process_images(input_dir, output_dir, reject_dir):
             else:
                 cx, cy = moon_center
                 detections[fname] = {"img": img, "cx": cx, "cy": cy,
-                                     "r": radius, "fl": fl}
+                                     "r": radius, "fl": fl, "limb": limb}
 
         except Exception as e:
             processing_state["results"].append(
@@ -299,8 +465,9 @@ def process_images(input_dir, output_dir, reject_dir):
         return
 
     # ── Consensus radius (same focal length = same pixel radius) ──────────────
-    all_radii   = [d["r"] for d in detections.values()]
-    consensus_r = int(round(np.median(all_radii)))
+    all_radii   = [float(d["r"]) for d in detections.values()]
+    consensus_rf = float(np.median(all_radii))
+    consensus_r = int(round(consensus_rf))
 
     # EXIF is often stripped by editors. In that case, the common pixel radius
     # is the practical focal-length check for one fixed camera/zoom sequence.
@@ -311,7 +478,7 @@ def process_images(input_dir, output_dir, reject_dir):
             shutil.copy2(os.path.join(input_dir, fname), os.path.join(reject_dir, fname))
             processing_state["results"].append({
                 "file": fname, "status": "rejected",
-                "msg": (f"Moon radius {det['r']}px differs from shared "
+                "msg": (f"Moon radius {det['r']:.1f}px differs from shared "
                         f"radius {consensus_r}px; likely focal-length change")
             })
             processing_state["done"] += 1
@@ -325,38 +492,73 @@ def process_images(input_dir, output_dir, reject_dir):
         "file": "__consensus__",
         "status": "info",
         "msg": (f"Consensus radius = {consensus_r}px  "
-                f"(individual: {sorted(all_radii)}) across {len(all_radii)} images")
+                f"(individual: {[round(r, 1) for r in sorted(all_radii)]}) "
+                f"across {len(all_radii)} images")
     })
 
-    # ── Pass 2: re-detect with fixed radius, then centre ─────────────────────
-    for fname, det in detections.items():
+    # ── Pass 2: centre with fixed radius (+ optional stack registration) ─────
+    names = list(detections.keys())
+    h, w = detections[names[0]]["img"].shape[:2]
+    centres, angles = {}, {}
+    for fname in names:
+        det = detections[fname]
+        limb = det["limb"]
+        if limb is not None:
+            # Same radius for every moon -> centre is no longer ambiguous.
+            cx, cy = fit_center_fixed_r(limb["pts"], limb["cx"], limb["cy"],
+                                        consensus_rf)
+            gx, gy = limb["centroid"]
+            angles[fname] = float(np.degrees(np.arctan2(gy - cy, gx - cx)))
+        else:
+            moon_center2, _ = find_moon_center(det["img"], fixed_r=consensus_r)
+            cx, cy = moon_center2 if moon_center2 is not None else (det["cx"], det["cy"])
+        centres[fname] = (float(cx), float(cy))
+
+    ref_angle = float(np.median(list(angles.values()))) if angles else 0.0
+    rots = {f: ((angles[f] - ref_angle) if (stack_align and f in angles) else 0.0)
+            for f in names}
+    mats = [build_matrix(*centres[f], rots[f], w, h) for f in names]
+
+    same_size = all(detections[f]["img"].shape[:2] == (h, w) for f in names)
+    if stack_align and same_size and len(names) >= 2:
+        try:
+            mats = refine_stack_alignment([detections[f]["img"] for f in names],
+                                          mats, w, h, consensus_rf)
+        except Exception as e:
+            processing_state["results"].append({
+                "file": "__stack__", "status": "info",
+                "msg": f"Stack registration skipped: {e}"})
+
+    for fname, M in zip(names, mats):
+        det = detections[fname]
         try:
             img = det["img"]
             fl  = det["fl"]
-            h, w = img.shape[:2]
-
-            # Re-detect with the shared radius window. The arc fit returns a
-            # per-image centre; only the radius used for the output is shared.
-            moon_center2, r2 = find_moon_center(img, fixed_r=consensus_r)
-            if moon_center2 is not None:
-                cx, cy = moon_center2
-            else:
-                # Fallback to pass-1 centre if re-detection fails
-                cx, cy = det["cx"], det["cy"]
-
+            ih, iw = img.shape[:2]
+            cx, cy = centres[fname]
             r = consensus_r
 
-            bg_color = sample_background_color(img, cx, cy, r)
-            centered = center_image(img, cx, cy, r, bg_color)
-            cv2.imwrite(os.path.join(output_dir, fname), centered)
+            bg_color = sample_background_color(img, int(cx), int(cy), r)
+            if (ih, iw) != (h, w):
+                M = build_matrix(cx, cy, rots[fname], iw, ih)
+            centered = cv2.warpAffine(img, np.asarray(M, np.float64), (iw, ih),
+                                      flags=cv2.INTER_CUBIC,
+                                      borderMode=cv2.BORDER_CONSTANT,
+                                      borderValue=bg_color)
+            cv2.imwrite(os.path.join(output_dir, fname), centered,
+                        [cv2.IMWRITE_JPEG_QUALITY, 98])
 
+            # Where the moon centre landed relative to the source pixel grid
+            sx = float(M[0][0] * cx + M[0][1] * cy + M[0][2]) - cx
+            sy = float(M[1][0] * cx + M[1][1] * cy + M[1][2]) - cy
+            rot = float(np.degrees(np.arctan2(M[1][0], M[0][0])))
             fl_str = f"{fl:.1f}mm" if fl else "N/A"
             processing_state["results"].append({
                 "file": fname, "status": "ok",
-                "msg": (f"Moon ({cx},{cy}) | r={r}px (consensus) | "
-                        f"raw_r={det['r']}px | "
-                        f"shift ({w//2-cx},{h//2-cy}) | fl={fl_str}"),
-                "offset": [w // 2 - cx, h // 2 - cy]
+                "msg": (f"Moon ({cx:.2f},{cy:.2f}) | r={r}px (consensus) | "
+                        f"raw_r={det['r']:.1f}px | "
+                        f"shift ({sx:.2f},{sy:.2f}) | rot {rot:+.2f}° | fl={fl_str}"),
+                "offset": [sx, sy]
             })
         except Exception as e:
             processing_state["results"].append(
@@ -389,10 +591,11 @@ def start():
         output_dir = os.path.join(input_dir, "centered")
     if not reject_dir:
         reject_dir = os.path.join(input_dir, "reject")
+    stack_align = bool(data.get("stack_align", True))
     processing_state.update(running=True, input_dir=input_dir,
                              output_dir=output_dir, reject_dir=reject_dir)
     threading.Thread(target=process_images,
-                     args=(input_dir, output_dir, reject_dir),
+                     args=(input_dir, output_dir, reject_dir, stack_align),
                      daemon=True).start()
     return jsonify({"status": "started", "input_dir": input_dir,
                     "output_dir": output_dir, "reject_dir": reject_dir})

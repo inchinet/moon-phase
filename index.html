@@ -423,6 +423,11 @@
   <div class="glass" style="margin-bottom:1.5rem;">
     <div class="controls">
       <button id="startBtn" onclick="startProcessing()">⚡ Start Centering</button>
+      <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;color:rgba(200,215,255,0.8);cursor:pointer;"
+             title="Same-session frames: de-rotate + sub-pixel register for AutoStakkert. Untick for multi-night phase sequences.">
+        <input type="checkbox" id="stackAlign" checked />
+        Stack align (AutoStakkert)
+      </label>
       <span class="status-badge idle" id="statusBadge">Idle</span>
     </div>
     <div class="progress-wrap">
@@ -747,7 +752,8 @@
     const res = await fetch('/start', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ input_dir: inputDir, output_dir: outputDir, reject_dir: rejectDir })
+      body: JSON.stringify({ input_dir: inputDir, output_dir: outputDir, reject_dir: rejectDir,
+                             stack_align: document.getElementById('stackAlign').checked })
     });
 
     if (!res.ok) {
