@@ -213,6 +213,142 @@ def _algebraic_circle(p):
     return cx, cy, float(np.sqrt(max(cx * cx + cy * cy - c[2], 0.0)))
 
 
+def detect_disc(img_bgr):
+    """Find a (nearly) full moon as the roundest compact bright blob.
+
+    Thresholds the smoothed image at several levels and keeps blobs whose
+    contour is convex and fills its minimum enclosing circle (city lights and
+    buildings are irregular, so they fail).  The centre is a circle fit to the
+    blob's convex hull, which ignores things like a plane crossing the disc.
+    Returns dict(cx, cy, r) in full-resolution pixels, or None.
+    """
+    h, w = img_bgr.shape[:2]
+    sc = min(1.0, 1500.0 / max(h, w))
+    small = cv2.resize(img_bgr, (max(1, int(w * sc)), max(1, int(h * sc))),
+                       interpolation=cv2.INTER_AREA)
+    sh, sw = small.shape[:2]
+    gray = cv2.GaussianBlur(cv2.cvtColor(small, cv2.COLOR_BGR2GRAY), (0, 0), 2)
+    otsu, _ = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    mx = float(gray.max())
+    levels = [otsu] + [mx * f for f in (0.8, 0.65, 0.5, 0.35)] + [40, 50, 60, 80, 110]
+    short = min(sh, sw)
+    best, best_score = None, 0.0
+    for t in levels:
+        mask = (gray > t).astype(np.uint8)
+        mask[: int(sh * 0.08), :] = 0           # caption text
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        for i in range(1, n):
+            area = stats[i, cv2.CC_STAT_AREA]
+            if area < (short * 0.03) ** 2 * np.pi:
+                continue
+            bw, bh = stats[i, cv2.CC_STAT_WIDTH], stats[i, cv2.CC_STAT_HEIGHT]
+            if max(bw, bh) > short * 0.5 or max(bw, bh) > 1.3 * min(bw, bh):
+                continue
+            comp = (lab == i).astype(np.uint8)
+            cnts, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            cnt = max(cnts, key=len)
+            hull = cv2.convexHull(cnt)
+            harea = cv2.contourArea(hull)
+            (_, _), er = cv2.minEnclosingCircle(hull)
+            if harea <= 0 or er <= 0:
+                continue
+            solidity = area / harea
+            fill = harea / (np.pi * er * er)
+            if solidity < 0.9 or fill < 0.9:
+                continue
+            score = solidity * fill * np.sqrt(area)
+            if score > best_score:
+                best_score = score
+                best = hull[:, 0, :].astype(np.float64)
+    if best is None:
+        return None
+    # densify hull points so the fit is not biased toward vertex spacing
+    pts = np.vstack([np.linspace(best[k], best[(k + 1) % len(best)], 8, endpoint=False)
+                     for k in range(len(best))])
+    cx, cy, r = _algebraic_circle(pts)
+    return {"cx": (cx + 0.5) / sc - 0.5, "cy": (cy + 0.5) / sc - 0.5, "r": r / sc}
+
+
+def detect_crescent(img_bgr):
+    """Find the moon circle from its bright crescent/limb.
+
+    A white top-hat keeps thin bright structures (the crescent) while
+    discarding smooth sky gradients and wide step edges (horizon/hills).
+    Text overlays are removed by ignoring the border bands and keeping only
+    the biggest blob.  A circle is fitted to the OUTER (convex hull) edge.
+    Returns dict(cx, cy, r) in full-resolution pixels, or None.
+    """
+    h, w = img_bgr.shape[:2]
+    sc = min(1.0, 1500.0 / max(h, w))
+    small = cv2.resize(img_bgr, (max(1, int(w * sc)), max(1, int(h * sc))),
+                       interpolation=cv2.INTER_AREA)
+    sh, sw = small.shape[:2]
+    gray = cv2.cvtColor(small, cv2.COLOR_BGR2GRAY)
+    gray = cv2.GaussianBlur(gray, (0, 0), 1.5)
+
+    k = max(15, int(min(sh, sw) * 0.14)) | 1
+    kern = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (k, k))
+    th = cv2.morphologyEx(gray, cv2.MORPH_TOPHAT, kern).astype(np.float32)
+
+    # Ignore caption/text bands
+    th[: int(sh * 0.10), :] = 0
+    th[int(sh * 0.85):, :] = 0
+
+    # Suppress dark ground (hills/trees) and the bright rim right above it
+    p75 = float(np.percentile(gray, 75))
+    dark = (gray < 0.3 * p75).astype(np.uint8)
+    dark = cv2.morphologyEx(dark, cv2.MORPH_OPEN, np.ones((5, 5), np.uint8))
+    dk = max(5, int(min(sh, sw) * 0.02))
+    dark = cv2.dilate(dark, cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (2 * dk + 1, 2 * dk + 1)))
+    th[dark > 0] = 0
+
+    med = float(np.median(th))
+    mad = float(np.median(np.abs(th - med))) + 1e-3
+    best = None
+    for kmul in (12, 8, 5, 3.5):
+        thr = med + kmul * mad * 1.4826
+        mask = (th > max(thr, 4)).astype(np.uint8)
+        mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE,
+                                cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+        n, lab, stats, _ = cv2.connectedComponentsWithStats(mask, 8)
+        if n < 2:
+            continue
+        # prefer the largest blob that is not tiny (rejects stars/planets)
+        order = np.argsort(-stats[1:, cv2.CC_STAT_AREA]) + 1
+        for idx in order[:3]:
+            bw, bh = stats[idx, cv2.CC_STAT_WIDTH], stats[idx, cv2.CC_STAT_HEIGHT]
+            if max(bw, bh) < min(sh, sw) * 0.08:
+                continue
+            comp = (lab == idx).astype(np.uint8)
+            cnts, _ = cv2.findContours(comp, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_NONE)
+            cnt = max(cnts, key=len)
+            if len(cnt) < 40:
+                continue
+            pts = cnt[:, 0, :].astype(np.float64)
+            hull = cv2.convexHull(cnt)
+            hd = np.array([abs(cv2.pointPolygonTest(hull, (float(x), float(y)), True))
+                           for x, y in pts])
+            seed = pts[hd < 2.5]
+            if len(seed) < 20:
+                continue
+            cx, cy, r = _algebraic_circle(seed)
+            for _ in range(4):
+                d = np.abs(np.hypot(pts[:, 0] - cx, pts[:, 1] - cy) - r)
+                sel = pts[(d < max(2.0, r * 0.04)) & (hd < 4.0)]
+                if len(sel) < 20:
+                    break
+                cx, cy, r = _algebraic_circle(sel)
+            if not (min(sh, sw) * 0.04 < r < min(sh, sw) * 0.35):
+                continue
+            best = (cx, cy, r)
+            break
+        if best:
+            break
+    if best is None:
+        return None
+    return {"cx": best[0] / sc, "cy": best[1] / sc, "r": best[2] / sc}
+
+
 def detect_limb(img_bgr):
     """Fit a circle to the moon's bright LIMB only.
 
@@ -383,7 +519,11 @@ def center_image(img, cx, cy, radius, bg_color):
     """Shift image so (cx, cy) -> photo centre. cx/cy may be outside original frame."""
     h, w = img.shape[:2]
     M = np.float32([[1, 0, w // 2 - cx], [0, 1, h // 2 - cy]])
-    return cv2.warpAffine(img, M, (w, h), borderValue=bg_color)
+    # Replicate the nearest real edge pixels when the translation exposes a
+    # small border. This preserves the source sky/background better than
+    # painting an artificial flat blue colour, while keeping the exact source
+    # dimensions requested by the UI.
+    return cv2.warpAffine(img, M, (w, h), borderMode=cv2.BORDER_REPLICATE)
 
 
 # ── Processing thread ─────────────────────────────────────────────────────────
@@ -428,24 +568,20 @@ def process_images(input_dir, output_dir, reject_dir, stack_align=True):
                 processing_state["done"] += 1
                 continue
 
-            fl = get_focal_length(fpath)
-            if fl is not None:
-                if reference_fl is None:
-                    reference_fl = fl
-                elif abs(fl - reference_fl) > 0.5:
-                    shutil.copy2(fpath, os.path.join(reject_dir, fname))
-                    processing_state["results"].append({
-                        "file": fname, "status": "rejected",
-                        "msg": f"Focal length {fl:.1f}mm != {reference_fl:.1f}mm"})
-                    reject_set.add(fname)
-                    processing_state["done"] += 1
-                    continue
+            fl = get_focal_length(fpath)  # informational only; never rejects
 
-            limb = detect_limb(img)
-            if limb is not None:
-                moon_center, radius = (limb["cx"], limb["cy"]), limb["r"]
+            fixed = False
+            limb = None
+            cres = detect_disc(img) or detect_crescent(img)
+            if cres is not None:
+                moon_center, radius = (cres["cx"], cres["cy"]), cres["r"]
+                fixed = True
             else:
-                moon_center, radius = find_moon_center(img)
+                limb = detect_limb(img)
+                if limb is not None:
+                    moon_center, radius = (limb["cx"], limb["cy"]), limb["r"]
+                else:
+                    moon_center, radius = find_moon_center(img)
             if moon_center is None:
                 processing_state["results"].append(
                     {"file": fname, "status": "skipped", "msg": "Moon not detected"})
@@ -453,7 +589,8 @@ def process_images(input_dir, output_dir, reject_dir, stack_align=True):
             else:
                 cx, cy = moon_center
                 detections[fname] = {"img": img, "cx": cx, "cy": cy,
-                                     "r": radius, "fl": fl, "limb": limb}
+                                     "r": radius, "fl": fl, "limb": limb,
+                                     "fixed": fixed}
 
         except Exception as e:
             processing_state["results"].append(
@@ -464,70 +601,31 @@ def process_images(input_dir, output_dir, reject_dir, stack_align=True):
         processing_state["running"] = False
         return
 
-    # ── Consensus radius (same focal length = same pixel radius) ──────────────
-    all_radii   = [float(d["r"]) for d in detections.values()]
-    consensus_rf = float(np.median(all_radii))
-    consensus_r = int(round(consensus_rf))
+    # Each photo is processed independently with its own fitted radius.
+    radii = {f: float(d["r"]) for f, d in detections.items()}
 
-    # EXIF is often stripped by editors. In that case, the common pixel radius
-    # is the practical focal-length check for one fixed camera/zoom sequence.
-    # Keep a generous tolerance for limb-fit noise, but reject clear outliers.
-    radius_tolerance = max(35, int(consensus_r * 0.08))
-    for fname, det in list(detections.items()):
-        if abs(det["r"] - consensus_r) > radius_tolerance:
-            shutil.copy2(os.path.join(input_dir, fname), os.path.join(reject_dir, fname))
-            processing_state["results"].append({
-                "file": fname, "status": "rejected",
-                "msg": (f"Moon radius {det['r']:.1f}px differs from shared "
-                        f"radius {consensus_r}px; likely focal-length change")
-            })
-            processing_state["done"] += 1
-            del detections[fname]
-
-    if not detections:
-        processing_state["running"] = False
-        return
-
-    processing_state["results"].append({
-        "file": "__consensus__",
-        "status": "info",
-        "msg": (f"Consensus radius = {consensus_r}px  "
-                f"(individual: {[round(r, 1) for r in sorted(all_radii)]}) "
-                f"across {len(all_radii)} images")
-    })
-
-    # ── Pass 2: centre with fixed radius (+ optional stack registration) ─────
+    # ── Pass 2: centre with own radius (+ optional stack registration) ───────
     names = list(detections.keys())
     h, w = detections[names[0]]["img"].shape[:2]
     centres, angles = {}, {}
     for fname in names:
         det = detections[fname]
         limb = det["limb"]
-        if limb is not None:
-            # Same radius for every moon -> centre is no longer ambiguous.
+        if det.get("fixed"):
+            cx, cy = det["cx"], det["cy"]
+        elif limb is not None:
             cx, cy = fit_center_fixed_r(limb["pts"], limb["cx"], limb["cy"],
-                                        consensus_rf)
+                                        radii[fname])
             gx, gy = limb["centroid"]
             angles[fname] = float(np.degrees(np.arctan2(gy - cy, gx - cx)))
         else:
-            moon_center2, _ = find_moon_center(det["img"], fixed_r=consensus_r)
+            moon_center2, _ = find_moon_center(det["img"], fixed_r=int(round(radii[fname])))
             cx, cy = moon_center2 if moon_center2 is not None else (det["cx"], det["cy"])
         centres[fname] = (float(cx), float(cy))
 
-    ref_angle = float(np.median(list(angles.values()))) if angles else 0.0
-    rots = {f: ((angles[f] - ref_angle) if (stack_align and f in angles) else 0.0)
-            for f in names}
-    mats = [build_matrix(*centres[f], rots[f], w, h) for f in names]
-
-    same_size = all(detections[f]["img"].shape[:2] == (h, w) for f in names)
-    if stack_align and same_size and len(names) >= 2:
-        try:
-            mats = refine_stack_alignment([detections[f]["img"] for f in names],
-                                          mats, w, h, consensus_rf)
-        except Exception as e:
-            processing_state["results"].append({
-                "file": "__stack__", "status": "info",
-                "msg": f"Stack registration skipped: {e}"})
+    # Pure translation: moon centre -> photo centre. No rotation, no stack ECC.
+    rots = {f: 0.0 for f in names}
+    mats = [build_matrix(*centres[f], 0.0, w, h) for f in names]
 
     for fname, M in zip(names, mats):
         det = detections[fname]
@@ -536,7 +634,7 @@ def process_images(input_dir, output_dir, reject_dir, stack_align=True):
             fl  = det["fl"]
             ih, iw = img.shape[:2]
             cx, cy = centres[fname]
-            r = consensus_r
+            r = int(round(radii[fname]))
 
             bg_color = sample_background_color(img, int(cx), int(cy), r)
             if (ih, iw) != (h, w):
@@ -555,8 +653,7 @@ def process_images(input_dir, output_dir, reject_dir, stack_align=True):
             fl_str = f"{fl:.1f}mm" if fl else "N/A"
             processing_state["results"].append({
                 "file": fname, "status": "ok",
-                "msg": (f"Moon ({cx:.2f},{cy:.2f}) | r={r}px (consensus) | "
-                        f"raw_r={det['r']:.1f}px | "
+                "msg": (f"Moon ({cx:.2f},{cy:.2f}) | r={r}px (own) | "
                         f"shift ({sx:.2f},{sy:.2f}) | rot {rot:+.2f}° | fl={fl_str}"),
                 "offset": [sx, sy]
             })
