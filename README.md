@@ -4,7 +4,7 @@ A local web utility (liquid glass UI) that detects the moon in each photo and **
 Results go to a configurable output folder (default: `centered/` under the source path), keeping the **original filename and exact size**.
 
 Derived from `moon-phase`, with these changes:
-![center moon](https://github.com/inchinet/moon-phase2/blob/main/screen.png)
+![center moon](https://github.com/inchinet/moon-phase/blob/main/screen.png)
 
 | | moon-phase | moon-phase2 |
 |---|---|---|
